@@ -33,7 +33,7 @@ const ChevronDownIcon = () => (
         />
     </svg>
 );
-const XIcon = ({ size = "w-4 h-4" }) => (
+const XIcon = ({ size = "w-4 h-4" }: { size?: string }) => (
     <svg viewBox="0 0 20 20" fill="currentColor" className={size}>
         <path
             fillRule="evenodd"
@@ -53,7 +53,6 @@ const ExternalLinkIcon = () => (
     </svg>
 );
 
-/* Correct Gmail "M" envelope icon */
 const GmailIcon = () => (
     <svg
         viewBox="0 0 24 24"
@@ -70,7 +69,6 @@ const GmailIcon = () => (
             fill="#4285F4"
             opacity="0"
         />
-        {/* Gmail envelope proper rendering */}
         <rect
             x="2"
             y="4"
@@ -115,14 +113,20 @@ const HubSpotLogoIcon = () => (
 );
 
 /* ───────── Editable Cell ───────── */
-function EditableCell({ value, onChange, className = "", link = false }) {
+function EditableCell({ value, onChange, className = "", link = false }: {
+    value: string;
+    onChange: (val: string) => void;
+    className?: string;
+    link?: boolean;
+}) {
     const [editing, setEditing] = useState(false);
     const [local, setLocal] = useState(value);
-    const inputRef = useRef(null);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         setLocal(value);
     }, [value]);
+
     useEffect(() => {
         if (editing) inputRef.current?.focus();
     }, [editing]);
@@ -173,7 +177,7 @@ function EditableCell({ value, onChange, className = "", link = false }) {
 }
 
 /* ───────── Create Company Modal ───────── */
-function CreateCompanyModal({ onClose, onSave }) {
+function CreateCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (form: any) => void; }) {
     const [form, setForm] = useState({
         domain: "",
         name: "",
@@ -183,7 +187,9 @@ function CreateCompanyModal({ onClose, onSave }) {
         city: "",
         state: "",
     });
-    const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+    // Fixed: Telling TS exactly what `k` is, and allowing `e` to be any input event
+    const set = (k: string) => (e: any) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
     return (
         <div
@@ -191,7 +197,6 @@ function CreateCompanyModal({ onClose, onSave }) {
             style={{ background: "rgba(0,0,0,0.4)" }}
         >
             <div className="bg-white rounded-xl shadow-2xl w-[480px] max-h-[90vh] flex flex-col">
-                {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
                     <h2 className="text-lg font-semibold text-gray-900">
                         Create Company
@@ -204,7 +209,6 @@ function CreateCompanyModal({ onClose, onSave }) {
                     </button>
                 </div>
 
-                {/* Body */}
                 <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
                     <div className="flex justify-end">
                         <button className="text-sm text-blue-600 hover:underline flex items-center gap-0.5">
@@ -212,7 +216,6 @@ function CreateCompanyModal({ onClose, onSave }) {
                         </button>
                     </div>
 
-                    {/* Domain */}
                     <div>
                         <label className="block text-xs font-semibold text-gray-800 mb-1.5">
                             Company domain name
@@ -225,7 +228,6 @@ function CreateCompanyModal({ onClose, onSave }) {
                         />
                     </div>
 
-                    {/* Company name */}
                     <div>
                         <label className="block text-xs font-semibold text-gray-800 mb-1.5">
                             Company name
@@ -237,14 +239,12 @@ function CreateCompanyModal({ onClose, onSave }) {
                         />
                     </div>
 
-                    {/* Helper hint */}
                     {!form.domain && !form.name && (
                         <p className="text-xs text-gray-400 text-center py-1 bg-gray-50 rounded-lg px-4">
                             Start by entering a domain name, an account name, or both.
                         </p>
                     )}
 
-                    {/* Owner */}
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1.5">
                             Company owner
@@ -268,7 +268,6 @@ function CreateCompanyModal({ onClose, onSave }) {
                         </div>
                     </div>
 
-                    {/* Industry */}
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1.5">
                             Industry
@@ -291,7 +290,6 @@ function CreateCompanyModal({ onClose, onSave }) {
                         </div>
                     </div>
 
-                    {/* Type */}
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1.5">
                             Type
@@ -313,7 +311,6 @@ function CreateCompanyModal({ onClose, onSave }) {
                         </div>
                     </div>
 
-                    {/* City */}
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1">
                             City
@@ -325,7 +322,6 @@ function CreateCompanyModal({ onClose, onSave }) {
                         />
                     </div>
 
-                    {/* State */}
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1">
                             State/Region
@@ -349,7 +345,6 @@ function CreateCompanyModal({ onClose, onSave }) {
                     </div>
                 </div>
 
-                {/* Footer */}
                 <div className="flex items-center gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
                     <button
                         onClick={() => {
@@ -414,10 +409,13 @@ function ContactsView() {
             owner: "No owner",
         },
     ]);
-    const update = (id, field, val) =>
+
+    // Fixed: Telling TS the exact types for the parameters
+    const update = (id: number, field: string, val: string) =>
         setContacts((cs) =>
             cs.map((c) => (c.id === id ? { ...c, [field]: val } : c))
         );
+
     const filtered = contacts.filter(
         (c) =>
             !tableSearch ||
@@ -446,7 +444,6 @@ function ContactsView() {
                 </button>
             </div>
 
-            {/* Tabs */}
             <div className="flex items-center border-b border-gray-200 px-4 mt-2 gap-0.5">
                 {[
                     { id: "all", label: "All contacts", badge: filtered.length },
@@ -457,8 +454,8 @@ function ContactsView() {
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id)}
                         className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.id
-                                ? "border-orange-500 text-orange-600"
-                                : "border-transparent text-gray-500 hover:text-gray-700"
+                            ? "border-orange-500 text-orange-600"
+                            : "border-transparent text-gray-500 hover:text-gray-700"
                             }`}
                     >
                         {tab.label}
@@ -477,7 +474,6 @@ function ContactsView() {
                 ))}
             </div>
 
-            {/* Toolbar */}
             <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 flex-wrap">
                 <div className="relative">
                     <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400">
@@ -506,7 +502,6 @@ function ContactsView() {
                 </div>
             </div>
 
-            {/* Filter chips */}
             <div className="flex items-center gap-3 px-4 py-2 text-xs text-gray-500 border-b border-gray-100 bg-gray-50/60 flex-wrap">
                 {[
                     "Contact owner ▾",
@@ -522,7 +517,6 @@ function ContactsView() {
                 ))}
             </div>
 
-            {/* Table */}
             <div className="overflow-x-auto">
                 <table className="w-full min-w-max text-sm">
                     <thead>
@@ -606,7 +600,6 @@ function ContactsView() {
                 </table>
             </div>
 
-            {/* Pagination */}
             <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
                 <div className="flex items-center gap-1">
                     <button
@@ -639,8 +632,10 @@ function CompaniesView() {
     const [tableSearch, setTableSearch] = useState("");
     const [showAddMenu, setShowAddMenu] = useState(false);
     const [showCreateModal, setShowCreateModal] = useState(false);
-    const addBtnRef = useRef(null);
-    const menuRef = useRef(null);
+
+    // Fixed: Telling TS what kind of HTML elements these Refs refer to
+    const addBtnRef = useRef<HTMLButtonElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
 
     const [companies, setCompanies] = useState([
         {
@@ -655,12 +650,14 @@ function CompaniesView() {
         },
     ]);
 
-    const update = (id, field, val) =>
+    // Fixed: Telling TS the exact types for the parameters
+    const update = (id: number, field: string, val: string) =>
         setCompanies((cs) =>
             cs.map((c) => (c.id === id ? { ...c, [field]: val } : c))
         );
 
-    const handleSaveNew = (form) => {
+    // Fixed: Adding 'any' so it knows form is an object being passed from the modal
+    const handleSaveNew = (form: any) => {
         setCompanies((cs) => [
             ...cs,
             {
@@ -677,12 +674,13 @@ function CompaniesView() {
     };
 
     useEffect(() => {
-        const handler = (e) => {
+        // Fixed: Tell TS this is a standard MouseEvent
+        const handler = (e: MouseEvent) => {
             if (
                 menuRef.current &&
-                !menuRef.current.contains(e.target) &&
+                !menuRef.current.contains(e.target as Node) &&
                 addBtnRef.current &&
-                !addBtnRef.current.contains(e.target)
+                !addBtnRef.current.contains(e.target as Node)
             )
                 setShowAddMenu(false);
         };
@@ -706,7 +704,6 @@ function CompaniesView() {
             )}
 
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-                {/* Header */}
                 <div className="flex items-center justify-between px-4 pt-4 pb-0">
                     <button className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 hover:text-gray-600">
                         Companies <ChevronDownIcon />
@@ -745,7 +742,6 @@ function CompaniesView() {
                     </div>
                 </div>
 
-                {/* Tabs */}
                 <div className="flex items-center border-b border-gray-200 px-4 mt-2">
                     {[
                         { id: "all", label: "All companies", badge: filtered.length },
@@ -755,8 +751,8 @@ function CompaniesView() {
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
                             className={`flex items-center gap-1.5 px-1 py-2.5 text-sm font-medium border-b-2 mr-4 transition-colors ${activeTab === tab.id
-                                    ? "border-orange-500 text-orange-600"
-                                    : "border-transparent text-gray-500 hover:text-gray-700"
+                                ? "border-orange-500 text-orange-600"
+                                : "border-transparent text-gray-500 hover:text-gray-700"
                                 }`}
                         >
                             {tab.label}
@@ -775,7 +771,6 @@ function CompaniesView() {
                     ))}
                 </div>
 
-                {/* Toolbar */}
                 <div className="flex items-center gap-2 px-4 py-3 flex-wrap">
                     <div className="relative">
                         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400">
@@ -804,7 +799,6 @@ function CompaniesView() {
                     </div>
                 </div>
 
-                {/* Table */}
                 <div className="overflow-x-auto border-t border-gray-100">
                     <table className="w-full min-w-max text-sm">
                         <thead>
@@ -920,7 +914,6 @@ function CompaniesView() {
                     </table>
                 </div>
 
-                {/* Pagination */}
                 <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
                     <div className="flex items-center gap-1">
                         <button
@@ -964,7 +957,6 @@ export default function CRMDashboard() {
             className="flex h-screen bg-gray-100 overflow-hidden"
             style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif" }}
         >
-            {/* Sidebar */}
             <aside
                 className="w-52 flex-shrink-0 flex flex-col"
                 style={{ background: "#1a1f2e" }}
@@ -983,8 +975,8 @@ export default function CRMDashboard() {
                                 key={item.id}
                                 onClick={() => setActiveNav(item.id)}
                                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-150 text-left ${isActive
-                                        ? ""
-                                        : "text-gray-400 hover:text-gray-200 hover:bg-white/5"
+                                    ? ""
+                                    : "text-gray-400 hover:text-gray-200 hover:bg-white/5"
                                     }`}
                                 style={
                                     isActive ? { background: "#FF7A59", color: "white" } : {}
@@ -1000,9 +992,7 @@ export default function CRMDashboard() {
                 </nav>
             </aside>
 
-            {/* Main area */}
             <div className="flex-1 flex flex-col overflow-hidden">
-                {/* Top Nav */}
                 <header
                     className="flex items-center px-4 py-2.5 gap-4 border-b border-white/10 flex-shrink-0"
                     style={{ background: "#1a1f2e" }}
@@ -1041,10 +1031,8 @@ export default function CRMDashboard() {
                     </div>
                 </header>
 
-                {/* Content */}
                 <main className="flex-1 overflow-y-auto bg-gray-50">
                     <div className="p-6 space-y-4 max-w-screen-xl mx-auto">
-                        {/* Email Banner */}
                         {bannerVisible && (
                             <div className="relative bg-white rounded-lg border border-gray-200 px-5 py-4 shadow-sm">
                                 <button
@@ -1069,7 +1057,6 @@ export default function CRMDashboard() {
                             </div>
                         )}
 
-                        {/* Dynamic panel */}
                         {activeNav === "contacts" ? <ContactsView /> : <CompaniesView />}
                     </div>
                 </main>
