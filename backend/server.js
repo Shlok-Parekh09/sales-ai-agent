@@ -1,4 +1,5 @@
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 const express = require("express");
 const cors = require("cors");
 const Groq = require("groq-sdk");
@@ -12,12 +13,13 @@ app.use(express.json());
 const groq = process.env.GROQ_API_KEY
   ? new Groq({ apiKey: process.env.GROQ_API_KEY })
   : null;
-const huggingFaceApiKey =
-  process.env.HUGGING_FACE_API_KEY || process.env.HF_TOKEN || "";
-const hfAlertsModel =
-  process.env.HF_ALERTS_MODEL || "meta-llama/Llama-3.1-8B-Instruct";
-const hfPipelineModel =
-  process.env.HF_PIPELINE_MODEL || "deepseek-ai/DeepSeek-R1:fastest";
+const mistralApiKey = process.env.MISTRAL_API_KEY || "";
+const mistralAlertsModel =
+  process.env.MISTRAL_ALERTS_MODEL || "mistral-small-latest";
+const mistralPipelineModel =
+  process.env.MISTRAL_PIPELINE_MODEL || "mistral-medium-latest";
+let mistralAuthBlockedReason = "";
+let mistralAuthBlockedLogged = false;
 
 const mockPublicData = {
   zomato: {
@@ -136,21 +138,36 @@ function extractJsonObject(raw) {
   return null;
 }
 
-async function callHuggingFaceChat({
+function extractMistralMessageText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((chunk) =>
+        typeof chunk === "string"
+          ? chunk
+          : safeTrim(chunk?.text || chunk?.content)
+      )
+      .join("")
+      .trim();
+  }
+  return "";
+}
+
+async function callMistralChat({
   model,
   systemPrompt,
   userPrompt,
   temperature = 0.3,
   maxTokens = 900,
 }) {
-  if (!huggingFaceApiKey || typeof fetch !== "function") {
+  if (!mistralApiKey || typeof fetch !== "function" || mistralAuthBlockedReason) {
     return null;
   }
 
-  const response = await fetch("https://router.huggingface.co/v1/chat/completions", {
+  const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${huggingFaceApiKey}`,
+      Authorization: `Bearer ${mistralApiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -166,11 +183,15 @@ async function callHuggingFaceChat({
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Hugging Face request failed (${response.status}): ${body.slice(0, 200)}`);
+    if (response.status === 401 || response.status === 403) {
+      mistralAuthBlockedReason =
+        "Mistral API key was rejected. Update MISTRAL_API_KEY in backend/.env and verify the key is active.";
+    }
+    throw new Error(`Mistral request failed (${response.status}): ${body.slice(0, 200)}`);
   }
 
   const payload = await response.json();
-  return payload?.choices?.[0]?.message?.content || "";
+  return extractMistralMessageText(payload?.choices?.[0]?.message?.content);
 }
 
 function buildPublicSignals(companyName, enriched) {
@@ -188,31 +209,75 @@ function buildPublicSignals(companyName, enriched) {
       impact: "Position AI-assisted selling as an operating leverage play, not just a CRM replacement.",
     },
     {
-      label: "Workflow complexity",
-      detail: `Current stack includes ${enriched.tech_stack.join(", ")}.`,
-      source: "Public technical footprint",
-      impact: "Lead with faster adoption and easier workflow orchestration across existing systems.",
+      label: "Workflow pressure",
+      detail:
+        enriched.pain_points[0] ||
+        `${companyName} likely needs tighter prospecting and pipeline execution as the team grows.`,
+      source: "Revenue workflow pattern",
+      impact: "Anchor the conversation on a concrete selling bottleneck instead of generic AI positioning.",
     },
   ];
 }
 
+function parseHeadcountMidpoint(value) {
+  const raw = String(value || "").toLowerCase().replace(/,/g, "").trim();
+  if (!raw) return null;
+
+  const rangeMatch = raw.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/);
+  if (rangeMatch) {
+    return (Number(rangeMatch[1]) + Number(rangeMatch[2])) / 2;
+  }
+
+  const plusMatch = raw.match(/(\d+(?:\.\d+)?)\s*\+/);
+  if (plusMatch) {
+    return Number(plusMatch[1]);
+  }
+
+  const singleMatch = raw.match(/(\d+(?:\.\d+)?)/);
+  return singleMatch ? Number(singleMatch[1]) : null;
+}
+
 function buildFitBreakdown(companySize, type, enriched) {
-  const sizeScore = /201|500|1000|5000/.test(String(companySize || ""))
-    ? 88
-    : /51|11/.test(String(companySize || ""))
-    ? 76
-    : 64;
-  const urgencyScore = enriched.pain_points.some((point) =>
-    /pipeline|prospecting|follow-up|sales/i.test(point)
-  )
-    ? 90
-    : 72;
-  const motionScore = /prospect|partner|technology/i.test(
-    `${type || ""} ${enriched.industry || ""}`
-  )
-    ? 84
-    : 73;
-  const adoptionScore = enriched.tech_stack.length >= 4 ? 82 : 74;
+  const midpoint =
+    parseHeadcountMidpoint(companySize) || parseHeadcountMidpoint(enriched.headcount_range);
+  let sizeScore = 70;
+  if (midpoint !== null) {
+    if (midpoint <= 10) sizeScore = 60;
+    else if (midpoint <= 50) sizeScore = 68;
+    else if (midpoint <= 200) sizeScore = 80;
+    else if (midpoint <= 1000) sizeScore = 90;
+    else if (midpoint <= 5000) sizeScore = 87;
+    else sizeScore = 82;
+  }
+
+  const urgencyMatches = enriched.pain_points.filter((point) =>
+    /pipeline|prospecting|follow-up|sales|visibility|stakeholder|manual/i.test(point)
+  ).length;
+  const urgencyScore = clamp(68 + urgencyMatches * 8, 68, 92);
+
+  const motionText = `${type || ""} ${enriched.industry || ""}`.toLowerCase();
+  const motionMatches = [
+    "prospect",
+    "partner",
+    "technology",
+    "marketplace",
+    "retail",
+    "delivery",
+    "commerce",
+    "b2b",
+  ].filter((keyword) => motionText.includes(keyword)).length;
+  const motionScore = clamp(
+    70 + motionMatches * 4 + (/prospect|partner|customer/i.test(String(type || "")) ? 6 : 0),
+    70,
+    90
+  );
+
+  const readinessSignals = [
+    midpoint !== null,
+    Boolean(enriched.recent_news),
+    Boolean(enriched.industry && enriched.industry !== "Unknown"),
+  ].filter(Boolean).length;
+  const adoptionScore = clamp(70 + readinessSignals * 6, 70, 88);
 
   return [
     {
@@ -260,8 +325,12 @@ function buildProspectingFallback({
 }) {
   const publicSignals = buildPublicSignals(companyName, enriched);
   const fitBreakdown = buildFitBreakdown(companySize, type, enriched);
+  const fitWeights = [0.35, 0.3, 0.2, 0.15];
   const fitScore = Math.round(
-    fitBreakdown.reduce((sum, item) => sum + item.score, 0) / fitBreakdown.length
+    fitBreakdown.reduce(
+      (sum, item, index) => sum + item.score * (fitWeights[index] || 0),
+      0
+    )
   );
   const contactName = owner || enriched.key_contact.name || "the revenue leader";
   const firstName = contactName.split(" ")[0] || "there";
@@ -273,7 +342,7 @@ function buildProspectingFallback({
   return {
     fitScore,
     scoreReasoning: `${companyName} shows a strong fit because its current growth motion suggests pressure on prospecting quality, pipeline visibility, and follow-up consistency.`,
-    researchSummary: `${companyName}${city ? ` in ${city}` : ""} appears to be operating through a period of growth and execution complexity. The strongest angle for CustBuds is helping the team reduce manual prospecting effort, maintain cleaner pipeline coverage, and run sharper follow-up without adding process overhead.`,
+    researchSummary: `${companyName}${city ? ` in ${city}` : ""} is currently focused on ${proofPoint.charAt(0).toLowerCase()}${proofPoint.slice(1)}. The likely problem for the team is ${mainPain.toLowerCase()} alongside ${secondPain.toLowerCase()}. CustBuds can help by improving target research, follow-up consistency, and early deal-risk visibility without adding more manual admin work.`,
     publicSignals,
     fitBreakdown,
     buyerPersonas: [
@@ -407,76 +476,28 @@ function normaliseAgentResult(raw, fallback, enriched) {
 }
 
 function buildDealIntelFallback(deals) {
-  const normalisedDeals = toArray(deals).map((deal) => ({
-    id: Number(deal.id),
-    name: safeTrim(deal.name) || "Untitled deal",
-    risk: safeTrim(deal.risk) || "Low",
-    signals: toArray(deal.signals)
-      .map((signal) => safeTrim(signal))
-      .filter(Boolean)
-      .slice(0, 4),
-    lastActivityLabel: safeTrim(deal.lastActivityLabel) || "Just now",
-    recovery: deal.recovery && typeof deal.recovery === "object"
-      ? {
-          headline: safeTrim(deal.recovery.headline),
-          action: safeTrim(deal.recovery.action),
-          talkingPoints: toArray(deal.recovery.talkingPoints)
-            .map((point) => safeTrim(point))
-            .filter(Boolean)
-            .slice(0, 4),
-        }
-      : null,
-  }));
-
   return {
     generatedAt: new Date().toISOString(),
     fallback: true,
-    alerts: normalisedDeals
-      .flatMap((deal) =>
-        deal.signals.slice(0, 2).map((signal) => ({
-          dealId: deal.id,
-          icon: normaliseIcon(deal.risk),
-          msg: `${deal.name}: ${signal}`,
-          time: deal.lastActivityLabel,
-          tone: normaliseTone(deal.risk),
-        }))
-      )
-      .slice(0, 6),
-    monitor: normalisedDeals
-      .filter((deal) => deal.recovery && deal.recovery.headline)
-      .slice(0, 8)
-      .map((deal) => ({
-        dealId: deal.id,
-        headline: deal.recovery.headline,
-        action: deal.recovery.action,
-        talkingPoints: deal.recovery.talkingPoints.length
-          ? deal.recovery.talkingPoints
-          : ["Reconfirm the next step, stakeholder owner, and decision blocker."],
-      })),
+    alerts: [],
+    monitor: [],
   };
 }
 
 function normaliseDealIntelResponse(raw, fallback) {
-  const fallbackAlertsByDeal = new Map(
-    fallback.alerts.map((alert) => [alert.dealId, alert])
-  );
-  const fallbackMonitorByDeal = new Map(
-    fallback.monitor.map((entry) => [entry.dealId, entry])
-  );
-
   const alerts = toArray(raw?.alerts)
     .map((alert) => {
       const dealId = Number(alert?.dealId);
-      const fallbackAlert = fallbackAlertsByDeal.get(dealId);
-      if (!Number.isFinite(dealId) || !fallbackAlert) return null;
+      const message = safeTrim(alert?.msg);
+      if (!Number.isFinite(dealId) || !message) return null;
       return {
         dealId,
-        icon: safeTrim(alert?.icon) || fallbackAlert.icon,
-        msg: safeTrim(alert?.msg) || fallbackAlert.msg,
-        time: safeTrim(alert?.time) || fallbackAlert.time,
+        icon: safeTrim(alert?.icon) || "i",
+        msg: message,
+        time: safeTrim(alert?.time) || "Now",
         tone: ["danger", "info", "positive"].includes(alert?.tone)
           ? alert.tone
-          : fallbackAlert.tone,
+          : "info",
       };
     })
     .filter(Boolean);
@@ -484,8 +505,9 @@ function normaliseDealIntelResponse(raw, fallback) {
   const monitor = toArray(raw?.monitor)
     .map((entry) => {
       const dealId = Number(entry?.dealId);
-      const fallbackEntry = fallbackMonitorByDeal.get(dealId);
-      if (!Number.isFinite(dealId) || !fallbackEntry) return null;
+      const headline = safeTrim(entry?.headline);
+      const action = safeTrim(entry?.action);
+      if (!Number.isFinite(dealId) || !headline || !action) return null;
       const talkingPoints = toArray(entry?.talkingPoints)
         .map((point) => safeTrim(point))
         .filter(Boolean)
@@ -493,11 +515,17 @@ function normaliseDealIntelResponse(raw, fallback) {
 
       return {
         dealId,
-        headline: safeTrim(entry?.headline) || fallbackEntry.headline,
-        action: safeTrim(entry?.action) || fallbackEntry.action,
-        talkingPoints: talkingPoints.length
-          ? talkingPoints
-          : fallbackEntry.talkingPoints,
+        headline,
+        action,
+        talkingPoints,
+        researchDetails:
+          entry?.researchDetails && typeof entry.researchDetails === "object"
+            ? {
+                currentFocus: safeTrim(entry.researchDetails.currentFocus),
+                problem: safeTrim(entry.researchDetails.problem),
+                helpAngle: safeTrim(entry.researchDetails.helpAngle),
+              }
+            : undefined,
       };
     })
     .filter(Boolean);
@@ -514,8 +542,17 @@ async function dealIntelligenceHandler(req, res) {
   const deals = toArray(req.body?.deals).slice(0, 12);
   const fallback = buildDealIntelFallback(deals);
 
-  if (!deals.length || !huggingFaceApiKey) {
+  if (!deals.length || !mistralApiKey) {
     return res.json(fallback);
+  }
+
+  if (mistralAuthBlockedReason) {
+    return res.json({
+      ...fallback,
+      fallback: true,
+      fallbackReason: mistralAuthBlockedReason,
+      authBlocked: true,
+    });
   }
 
   const compactDeals = deals.map((deal) => ({
@@ -531,6 +568,8 @@ async function dealIntelligenceHandler(req, res) {
     contact: safeTrim(deal.contact),
     activityCount: Number(deal.activityCount || 0),
     lastActivityLabel: safeTrim(deal.lastActivityLabel),
+    researchSummary: safeTrim(deal.researchSummary),
+    companyFocus: safeTrim(deal.companyFocus),
     signals: toArray(deal.signals).map((signal) => safeTrim(signal)).filter(Boolean).slice(0, 4),
     recovery: deal.recovery && typeof deal.recovery === "object"
       ? {
@@ -547,17 +586,17 @@ async function dealIntelligenceHandler(req, res) {
   const alertsPrompt = `Deals snapshot:
 ${JSON.stringify(compactDeals, null, 2)}
 
-Write concise alert rows for the highest-priority risk signals.`;
+Write concise alert rows for the highest-priority risk signals. Use any researchSummary or companyFocus context to make the alert more specific to what the company is currently doing and why the risk matters now.`;
 
   const pipelinePrompt = `Deals snapshot:
 ${JSON.stringify(compactDeals.filter((deal) => deal.recovery), null, 2)}
 
-Write recovery plays for the pipeline risk monitor using the existing risk and recovery context.`;
+Write recovery plays for the pipeline risk monitor using the existing risk, recovery context, and company research details. For each deal, explain what the company is currently focused on, what problem CustBuds can solve for them, and how the seller should position help.`;
 
-  try {
-    const [alertsRaw, monitorRaw] = await Promise.all([
-      callHuggingFaceChat({
-        model: hfAlertsModel,
+    try {
+      const [alertsRaw, monitorRaw] = await Promise.all([
+      callMistralChat({
+        model: mistralAlertsModel,
         systemPrompt: `You write CRM alert text for a sales team.
 Return ONLY valid JSON with this schema:
 {
@@ -576,13 +615,15 @@ Rules:
 - Keep each msg under 120 characters.
 - Use only tones "danger", "info", or "positive".
 - Use only the provided deal ids.
-- Focus on risk signals, not generic summaries.`,
+- Focus on risk signals, not generic summaries.
+- When research context is available, tie the alert to what the company is currently doing.
+- Surface possible risks such as momentum loss, missing stakeholders, weak research coverage, competitor pressure, or a mismatch between current focus and deal progress.`,
         userPrompt: alertsPrompt,
         temperature: 0.25,
         maxTokens: 700,
       }),
-      callHuggingFaceChat({
-        model: hfPipelineModel,
+      callMistralChat({
+        model: mistralPipelineModel,
         systemPrompt: `You are a pipeline risk monitor copilot for a B2B sales team.
 Return ONLY valid JSON with this schema:
 {
@@ -591,7 +632,12 @@ Return ONLY valid JSON with this schema:
       "dealId": 0,
       "headline": "",
       "action": "",
-      "talkingPoints": ["", "", ""]
+      "talkingPoints": ["", "", ""],
+      "researchDetails": {
+        "currentFocus": "",
+        "problem": "",
+        "helpAngle": ""
+      }
     }
   ]
 }
@@ -601,7 +647,11 @@ Rules:
 - Headline should be a short, concrete recovery angle.
 - Action should be one sentence.
 - talkingPoints should contain 2 to 4 specific seller talking points.
-- Preserve the risk context already present in the snapshot.`,
+- Preserve the risk context already present in the snapshot.
+- researchDetails.currentFocus must summarize what the company is currently focused on.
+- researchDetails.problem must explain the revenue or pipeline problem CustBuds can solve.
+- researchDetails.helpAngle must say how CustBuds should help in practical business terms.
+- Do not mention tech stacks, frameworks, or engineering tooling.`,
         userPrompt: pipelinePrompt,
         temperature: 0.35,
         maxTokens: 1200,
@@ -622,11 +672,19 @@ Rules:
       )
     );
   } catch (err) {
-    console.error("Deal intelligence agent fallback:", err.message);
+    if (mistralAuthBlockedReason) {
+      if (!mistralAuthBlockedLogged) {
+        console.warn(`Deal intelligence agent disabled: ${mistralAuthBlockedReason}`);
+        mistralAuthBlockedLogged = true;
+      }
+    } else {
+      console.error("Deal intelligence agent fallback:", err.message);
+    }
     return res.json({
       ...fallback,
       fallback: true,
-      fallbackReason: err.message,
+      fallbackReason: mistralAuthBlockedReason || err.message,
+      authBlocked: Boolean(mistralAuthBlockedReason),
     });
   }
 }
@@ -662,6 +720,7 @@ Your job is to:
 2. Score fit for CustBuds from 0-100.
 3. Write personalized outreach.
 4. Create adaptive messaging adjustments based on engagement signals.
+5. Summarize what the company is currently focused on, what problem they are likely facing, and how CustBuds can help.
 
 Return ONLY valid JSON.
 
@@ -700,12 +759,18 @@ Public research inputs:
 - Industry: ${enriched.industry}
 - Headcount range: ${enriched.headcount_range}
 - Recent news: ${enriched.recent_news}
-- Tech stack: ${enriched.tech_stack.join(", ")}
 - Key contact: ${enriched.key_contact.name} (${enriched.key_contact.title})
 - Pain points:
 ${enriched.pain_points.map((point, index) => `  ${index + 1}. ${point}`).join("\n")}
 
-Create a concise, high-signal output for a revenue team selling an AI-native CRM that improves target research, fit scoring, outreach personalization, and deal-risk visibility.`;
+Create a concise, high-signal output for a revenue team selling an AI-native CRM that improves target research, fit scoring, outreach personalization, and deal-risk visibility.
+
+Important:
+- Do not mention tech stacks, frameworks, or tooling.
+- In researchSummary, clearly include:
+  1. what the company is currently focused on,
+  2. what problem or pressure they are likely facing,
+  3. how CustBuds can help solve that problem.`;
 
   try {
     const completion = await groq.chat.completions.create({

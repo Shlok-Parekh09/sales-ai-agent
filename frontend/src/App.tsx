@@ -74,6 +74,11 @@ type DealIntelRecovery = {
     headline: string;
     action: string;
     talkingPoints: string[];
+    researchDetails?: {
+        currentFocus: string;
+        problem: string;
+        helpAngle: string;
+    };
 };
 
 type DealIntelRecord = {
@@ -92,6 +97,8 @@ type DealIntelRecord = {
     lastActivityLabel: string;
     heatmapBars: number[];
     recovery: DealIntelRecovery | null;
+    researchSummary?: string;
+    companyFocus?: string;
 };
 
 type DealIntelAlert = {
@@ -112,6 +119,8 @@ type DealIntelRemoteMonitor = DealIntelRecovery & {
 type DealIntelModelResponse = {
     generatedAt?: string;
     fallback?: boolean;
+    fallbackReason?: string;
+    authBlocked?: boolean;
     alerts: DealIntelRemoteAlert[];
     monitor: DealIntelRemoteMonitor[];
 };
@@ -121,23 +130,86 @@ type DealHeatmapRow = {
     bars: number[];
 };
 
+type EmailProviderConfig = {
+    provider: "Gmail" | "Outlook" | "Other";
+    senderName: string;
+    senderEmail: string;
+    signature: string;
+    connectedAt: string;
+};
+
+const parseEmailDraft = (rawBody: string) => {
+    const trimmed = String(rawBody || "").trim();
+    const lines = trimmed.split("\n").map(line => line.trim()).filter(Boolean);
+    let subject = lines.length > 0 ? lines[0] : "New Email";
+    subject = subject.replace(/^subject:\s*/i, "");
+    const body = lines.length > 1 ? lines.slice(1).join("\n\n") : trimmed;
+
+    return { subject, body };
+};
+
+const buildComposeUrl = ({
+    provider,
+    to,
+    subject,
+    body,
+}: {
+    provider: EmailProviderConfig["provider"];
+    to?: string;
+    subject: string;
+    body: string;
+}) => {
+    const recipient = encodeURIComponent(to || "");
+    const encodedSubject = encodeURIComponent(subject);
+    const encodedBody = encodeURIComponent(body);
+
+    if (provider === "Gmail") {
+        return `https://mail.google.com/mail/?view=cm&fs=1&to=${recipient}&su=${encodedSubject}&body=${encodedBody}`;
+    }
+
+    if (provider === "Outlook") {
+        return `https://outlook.office.com/mail/deeplink/compose?to=${recipient}&subject=${encodedSubject}&body=${encodedBody}`;
+    }
+
+    return `mailto:${recipient}?subject=${encodedSubject}&body=${encodedBody}`;
+};
+
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PROSPECTING AGENT RESULT PANEL
    Rendered in the main content area after the agent runs.
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: () => void }) {
+function AgentResultPanel({
+    result,
+    onClose,
+    emailProvider,
+    onConnectProvider,
+    onRegenerate,
+    onStartSequence,
+    onScheduleSequence,
+}: {
+    result: AgentResult;
+    onClose: () => void;
+    emailProvider: EmailProviderConfig | null;
+    onConnectProvider: () => void;
+    onRegenerate: (result: AgentResult) => Promise<string>;
+    onStartSequence: (result: AgentResult, emailKey: "email1" | "email2") => Promise<string>;
+    onScheduleSequence: (result: AgentResult, emailKey: "email1" | "email2", scheduledFor: string) => Promise<string>;
+}) {
     const [activeEmail, setActiveEmail] = useState<"email1" | "email2">("email1");
     const [copied, setCopied] = useState(false);
+    const [notice, setNotice] = useState<string | null>(null);
+    const [isRegenerating, setIsRegenerating] = useState(false);
+    const [isStartingSequence, setIsStartingSequence] = useState(false);
+    const [isScheduling, setIsScheduling] = useState(false);
+    const [showScheduleModal, setShowScheduleModal] = useState(false);
+    const [scheduleDate, setScheduleDate] = useState(() => new Date().toISOString().slice(0, 10));
+    const [scheduleTime, setScheduleTime] = useState("09:00");
 
     const scoreColor = result.fitScore >= 80 ? "#22c55e" : result.fitScore >= 60 ? "#f59e0b" : "#ef4444";
-    const scoreBg   = result.fitScore >= 80 ? "#f0fdf4" : result.fitScore >= 60 ? "#fffbeb" : "#fef2f2";
+    const scoreBg = result.fitScore >= 80 ? "#f0fdf4" : result.fitScore >= 60 ? "#fffbeb" : "#fef2f2";
 
     const rawBody = (result[activeEmail] || "").trim();
-    const lines = rawBody.split("\n").map(l => l.trim()).filter(l => l !== "");
-    let subject = lines.length > 0 ? lines[0] : "New Email";
-    // Clean up "Subject:" prefix if the AI included it
-    subject = subject.replace(/^subject:\s*/i, "");
-    const body = lines.length > 1 ? lines.slice(1).join("\n\n") : rawBody;
+    const { subject, body } = parseEmailDraft(rawBody);
 
     const copyToClipboard = () => {
         navigator.clipboard.writeText(rawBody).then(() => {
@@ -146,11 +218,44 @@ function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: (
         });
     };
 
+    const handleRegenerateClick = async () => {
+        setIsRegenerating(true);
+        try {
+            setNotice(await onRegenerate(result));
+        } finally {
+            setIsRegenerating(false);
+        }
+    };
+
+    const handleStartSequenceClick = async () => {
+        setIsStartingSequence(true);
+        try {
+            setNotice(await onStartSequence(result, activeEmail));
+        } finally {
+            setIsStartingSequence(false);
+        }
+    };
+
+    const handleScheduleConfirm = async () => {
+        const scheduledFor = scheduleDate && scheduleTime ? `${scheduleDate}T${scheduleTime}` : "";
+        if (!scheduledFor) {
+            setNotice("Choose a date and time first.");
+            return;
+        }
+
+        setIsScheduling(true);
+        try {
+            setNotice(await onScheduleSequence(result, activeEmail, scheduledFor));
+            setShowScheduleModal(false);
+        } finally {
+            setIsScheduling(false);
+        }
+    };
+
     return (
         <div className="bg-white rounded-xl border border-sky-200 shadow-lg overflow-hidden">
-            {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-sky-100"
-                 style={{ background: "linear-gradient(135deg, #0a1628, #0ea5e9)" }}>
+                style={{ background: "linear-gradient(135deg, #0a1628, #0ea5e9)" }}>
                 <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
                         <svg viewBox="0 0 20 20" fill="white" className="w-5 h-5">
@@ -170,10 +275,9 @@ function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: (
             </div>
 
             <div className="p-6 space-y-5">
-                {/* Fit Score + Reasoning */}
                 <div className="flex items-center gap-5">
                     <div className="flex flex-col items-center justify-center w-20 h-20 rounded-2xl border-2 flex-shrink-0"
-                         style={{ background: scoreBg, borderColor: scoreColor }}>
+                        style={{ background: scoreBg, borderColor: scoreColor }}>
                         <span className="text-2xl font-black" style={{ color: scoreColor }}>{result.fitScore}</span>
                         <span className="text-xs font-semibold" style={{ color: scoreColor }}>/ 100</span>
                     </div>
@@ -190,49 +294,23 @@ function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: (
                     </div>
                 )}
 
-                {/* Enriched intel pills */}
                 {result.enrichedProfile && (
                     <div className="flex flex-wrap gap-2">
                         <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Industry: {result.enrichedProfile.industry}</span>
-                        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Team: {result.enrichedProfile.headcount_range}</span>
                         <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Contact: {result.enrichedProfile.key_contact.name} - {result.enrichedProfile.key_contact.title}</span>
-                        {result.enrichedProfile.tech_stack.slice(0, 3).map(t => (
-                            <span key={t} className="px-2.5 py-1 bg-slate-50 text-slate-600 text-xs rounded-full font-medium">{t}</span>
-                        ))}
                     </div>
                 )}
 
-                {result.publicSignals && result.publicSignals.length > 0 && (
-                    <div className="space-y-2">
-                        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Public Signals</div>
-                        <div className="grid gap-2 md:grid-cols-3">
-                            {result.publicSignals.slice(0, 3).map((signal, index) => (
-                                <div key={`${signal.label}-${index}`} className="rounded-xl border border-sky-100 bg-sky-50/60 p-3">
-                                    <div className="text-xs font-semibold text-sky-700">{signal.label}</div>
-                                    <p className="mt-1 text-xs text-gray-600 leading-relaxed">{signal.detail}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* Email Sequencer */}
                 <div>
                     <div className="flex items-center justify-between mb-2">
                         <div className="flex gap-1">
                             <button onClick={() => setActiveEmail("email1")}
-                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                                    activeEmail === "email1"
-                                        ? "text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
-                                }`}
+                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeEmail === "email1" ? "text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
                                 style={activeEmail === "email1" ? { background: "#0ea5e9" } : {}}>
                                 Email 1 - Cold Outreach
                             </button>
                             <button onClick={() => setActiveEmail("email2")}
-                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                                    activeEmail === "email2"
-                                        ? "text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
-                                }`}
+                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeEmail === "email2" ? "text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"}`}
                                 style={activeEmail === "email2" ? { background: "#0ea5e9" } : {}}>
                                 Email 2 - Follow-up
                             </button>
@@ -249,20 +327,6 @@ function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: (
                     </div>
                 </div>
 
-                {result.messagingAdjustments && result.messagingAdjustments.length > 0 && (
-                    <div className="space-y-2">
-                        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Adaptive Messaging</div>
-                        <div className="space-y-2">
-                            {result.messagingAdjustments.slice(0, 2).map((item, index) => (
-                                <div key={`${item.signal}-${index}`} className="rounded-xl border border-amber-100 bg-amber-50 p-3">
-                                    <div className="text-xs font-semibold text-amber-700">{item.signal}</div>
-                                    <p className="mt-1 text-xs text-gray-700">{item.adjustment}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
                 {result.nextActions && result.nextActions.length > 0 && (
                     <div className="rounded-xl border border-gray-200 bg-white p-4">
                         <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Next Actions</div>
@@ -277,13 +341,176 @@ function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: (
                     </div>
                 )}
 
-                {/* CTAs */}
                 <div className="flex gap-2 pt-1">
-                    <button className="px-4 py-2 text-sm font-semibold text-white rounded-lg hover:opacity-90 transition-opacity"
+                    <button
+                        className="px-4 py-2 text-sm font-semibold text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-60"
                         style={{ background: "#0ea5e9" }}
-                        onClick={() => alert("Sequence started! (Connect to your email provider)")}>Start Sequence</button>
-                    <button className="px-4 py-2 text-sm font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 transition-colors">Regenerate</button>
-                    <button className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors">Schedule</button>
+                        disabled={isStartingSequence}
+                        onClick={handleStartSequenceClick}
+                    >
+                        {isStartingSequence ? "Opening..." : "Start Sequence"}
+                    </button>
+                    <button
+                        className="px-4 py-2 text-sm font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 transition-colors disabled:opacity-60"
+                        disabled={isRegenerating}
+                        onClick={handleRegenerateClick}
+                    >
+                        {isRegenerating ? "Regenerating..." : "Regenerate"}
+                    </button>
+                    <button
+                        className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
+                        onClick={() => setShowScheduleModal(true)}
+                    >
+                        Schedule
+                    </button>
+                </div>
+
+                {notice && (
+                    <div className="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs text-sky-800">
+                        {notice}
+                    </div>
+                )}
+
+                {showScheduleModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.35)" }}>
+                        <div className="w-[420px] rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden">
+                            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+                                <div>
+                                    <div className="text-sm font-bold text-gray-900">Schedule Sequence</div>
+                                    <div className="text-xs text-gray-400 mt-0.5">{result.companyName}</div>
+                                </div>
+                                <button onClick={() => setShowScheduleModal(false)} className="text-gray-400 hover:text-gray-600">
+                                    <XIcon size="w-4 h-4" />
+                                </button>
+                            </div>
+                            <div className="px-5 py-4 space-y-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Date</label>
+                                    <input
+                                        type="date"
+                                        value={scheduleDate}
+                                        onChange={(event) => setScheduleDate(event.target.value)}
+                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-sky-400"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Time</label>
+                                    <input
+                                        type="time"
+                                        value={scheduleTime}
+                                        onChange={(event) => setScheduleTime(event.target.value)}
+                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-sky-400"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200 bg-slate-50">
+                                <button onClick={() => setShowScheduleModal(false)} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-white">
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleScheduleConfirm}
+                                    disabled={isScheduling}
+                                    className="px-4 py-2 text-sm font-semibold text-white rounded-lg hover:opacity-90 disabled:opacity-60"
+                                    style={{ background: "#0ea5e9" }}
+                                >
+                                    {isScheduling ? "Saving..." : "Schedule"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function EmailProviderModal({
+    initialValue,
+    onClose,
+    onSave,
+}: {
+    initialValue: EmailProviderConfig | null;
+    onClose: () => void;
+    onSave: (config: EmailProviderConfig) => void;
+}) {
+    const [provider, setProvider] = useState<EmailProviderConfig["provider"]>(initialValue?.provider || "Gmail");
+    const [senderName, setSenderName] = useState(initialValue?.senderName || "");
+    const [senderEmail, setSenderEmail] = useState(initialValue?.senderEmail || "");
+    const [signature, setSignature] = useState(initialValue?.signature || "Best regards,\nSales Team");
+
+    const canSave = senderEmail.trim() !== "";
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
+            <div className="w-[460px] rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                    <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Connect Email Provider</h2>
+                        <p className="text-xs text-gray-400 mt-0.5">Use your preferred provider for sequence drafts and scheduling.</p>
+                    </div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100">
+                        <XIcon size="w-5 h-5" />
+                    </button>
+                </div>
+                <div className="px-6 py-5 space-y-4">
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Provider</label>
+                        <select
+                            value={provider}
+                            onChange={(event) => setProvider(event.target.value as EmailProviderConfig["provider"])}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-sky-400 bg-white"
+                        >
+                            <option value="Gmail">Gmail</option>
+                            <option value="Outlook">Outlook</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Sender name</label>
+                        <input
+                            value={senderName}
+                            onChange={(event) => setSenderName(event.target.value)}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-sky-400"
+                            placeholder="Sales Team"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Sender email</label>
+                        <input
+                            type="email"
+                            value={senderEmail}
+                            onChange={(event) => setSenderEmail(event.target.value)}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-sky-400"
+                            placeholder="sales@yourcompany.com"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Signature</label>
+                        <textarea
+                            value={signature}
+                            onChange={(event) => setSignature(event.target.value)}
+                            className="w-full h-28 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-sky-400 resize-none"
+                        />
+                    </div>
+                </div>
+                <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-200 bg-slate-50">
+                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-white">
+                        Cancel
+                    </button>
+                    <button
+                        onClick={() => onSave({
+                            provider,
+                            senderName: senderName.trim(),
+                            senderEmail: senderEmail.trim(),
+                            signature,
+                            connectedAt: new Date().toISOString(),
+                        })}
+                        disabled={!canSave}
+                        className="px-4 py-2 text-sm font-semibold text-white rounded-lg hover:opacity-90 disabled:opacity-60"
+                        style={{ background: "#0ea5e9" }}
+                    >
+                        Save connection
+                    </button>
                 </div>
             </div>
         </div>
@@ -1998,9 +2225,6 @@ function ProspectingAgentView({
         ? Math.round(agentResults.reduce((sum, r) => sum + (r.fitScore || 0), 0) / agentResults.length)
         : 0;
     const highFitTargets = agentResults.filter(r => r.fitScore >= 80).length;
-    const researchSignals = agentResults.reduce((sum, r) => sum + (r.publicSignals?.length || 0), 0);
-    const adaptivePlays = agentResults.reduce((sum, r) => sum + (r.messagingAdjustments?.length || 0), 0);
-
     const activityLog = agentResults.flatMap((result, index) => {
         const items = [
             {
@@ -2080,8 +2304,6 @@ function ProspectingAgentView({
                 <MetricCard label="High-Fit Accounts" value={String(highFitTargets)} sub={highFitTargets === 0 ? "Awaiting strong fits" : "80+ fit score"} />
                 <MetricCard label="Sequences Ready" value={String(sequencesReady)} sub={sequencesReady === 0 ? "No sequences yet" : `${sequencesReady} ready to send`} />
                 <MetricCard label="Avg. Fit Score" value={avgFitScore > 0 ? String(avgFitScore) : "--"} sub="/ 100" />
-                <MetricCard label="Research Signals" value={String(researchSignals)} sub="Captured from public inputs" />
-                <MetricCard label="Adaptive Plays" value={String(adaptivePlays)} sub="Messaging adjustments ready" />
             </div>
 
             {/* Target Queue */}
@@ -2205,41 +2427,6 @@ function ProspectingAgentView({
                                                                             <p className="text-sm text-gray-700 leading-relaxed">{t.researchSummary}</p>
                                                                         </div>
                                                                     )}
-
-                                                                    {t.publicSignals && t.publicSignals.length > 0 && (
-                                                                        <div className="rounded-xl border border-slate-200 bg-white p-4">
-                                                                            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Public Signals</div>
-                                                                            <div className="space-y-2">
-                                                                                {t.publicSignals.slice(0, 3).map((signal, signalIndex) => (
-                                                                                    <div key={`${signal.label}-${signalIndex}`} className="rounded-lg border border-sky-100 bg-sky-50/70 p-3">
-                                                                                        <div className="text-xs font-semibold text-sky-700">{signal.label}</div>
-                                                                                        <p className="mt-1 text-xs text-gray-700">{signal.detail}</p>
-                                                                                        {signal.impact && <p className="mt-1 text-[11px] text-slate-500">{signal.impact}</p>}
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-
-                                                                    {t.fitBreakdown && t.fitBreakdown.length > 0 && (
-                                                                        <div className="rounded-xl border border-slate-200 bg-white p-4">
-                                                                            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Fit Breakdown</div>
-                                                                            <div className="space-y-3">
-                                                                                {t.fitBreakdown.slice(0, 4).map((item, itemIndex) => (
-                                                                                    <div key={`${item.label}-${itemIndex}`}>
-                                                                                        <div className="flex items-center justify-between text-xs font-semibold text-gray-700 mb-1">
-                                                                                            <span>{item.label}</span>
-                                                                                            <span>{item.score}/100</span>
-                                                                                        </div>
-                                                                                        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden mb-1.5">
-                                                                                            <div className="h-full rounded-full bg-sky-500" style={{ width: `${item.score}%` }} />
-                                                                                        </div>
-                                                                                        <p className="text-[11px] text-slate-500">{item.summary}</p>
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
                                                                 </div>
 
                                                                 <div className="space-y-3">
@@ -2255,28 +2442,6 @@ function ProspectingAgentView({
                                                                                         </div>
                                                                                         <div className="mt-1 text-xs font-medium text-sky-700">{step.objective}</div>
                                                                                         <p className="mt-1 text-xs text-gray-600 leading-relaxed">{step.message}</p>
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-
-                                                                    {t.messagingAdjustments && t.messagingAdjustments.length > 0 && (
-                                                                        <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
-                                                                            <div className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">Adaptive Messaging</div>
-                                                                            <div className="space-y-2">
-                                                                                {t.messagingAdjustments.slice(0, 3).map((item, itemIndex) => (
-                                                                                    <div key={`${item.signal}-${itemIndex}`} className="rounded-lg border border-amber-200 bg-white/70 p-3">
-                                                                                        <div className="text-xs font-semibold text-gray-800">{item.signal}</div>
-                                                                                        <p className="mt-1 text-xs text-gray-700">{item.adjustment}</p>
-                                                                                        <div className="mt-2 space-y-1">
-                                                                                            {item.talkingPoints.slice(0, 3).map((point, pointIndex) => (
-                                                                                                <div key={`${point}-${pointIndex}`} className="flex items-start gap-2 text-[11px] text-slate-600">
-                                                                                                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-                                                                                                    <span>{point}</span>
-                                                                                                </div>
-                                                                                            ))}
-                                                                                        </div>
                                                                                     </div>
                                                                                 ))}
                                                                             </div>
@@ -2338,9 +2503,18 @@ function ProspectingAgentView({
 }
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€ 2. Deal Intelligence Agent View â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+const DEAL_INTEL_SESSION_KEY = "custbuds_deal_intel_session";
+
 function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResult[] }) {
     const [refreshTick, setRefreshTick] = useState(0);
-    const [modelIntel, setModelIntel] = useState<DealIntelModelResponse | null>(null);
+    const [modelIntel, setModelIntel] = useState<DealIntelModelResponse | null>(() => {
+        try {
+            const stored = sessionStorage.getItem(DEAL_INTEL_SESSION_KEY);
+            return stored ? JSON.parse(stored) : null;
+        } catch {
+            return null;
+        }
+    });
 
     useEffect(() => {
         const intervalId = window.setInterval(() => setRefreshTick(tick => tick + 1), 15000);
@@ -2509,7 +2683,7 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
                 stage: deal.stage,
                 health,
                 risk,
-                signals: signals.length > 0 ? signals.slice(0, 4) : ["No material risk signals detected from current CRM data"],
+                signals: signals.slice(0, 4),
                 owner: deal.owner,
                 close: deal.expectedClose,
                 company: companyLabel,
@@ -2518,6 +2692,8 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
                 lastActivityLabel: formatRelativeDayLabel(lastActivity),
                 heatmapBars,
                 recovery: recoveryForDeal(categories, deal, research),
+                researchSummary: research?.researchSummary || "",
+                companyFocus: research?.publicSignals?.[0]?.detail || "",
             } as DealIntelRecord;
         }).sort((a, b) => a.health - b.health);
 
@@ -2554,12 +2730,17 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
             activityCount: deal.activityCount,
             lastActivityLabel: deal.lastActivityLabel,
             recovery: deal.recovery,
+            researchSummary: deal.researchSummary,
+            companyFocus: deal.companyFocus,
         })),
     }), [localIntelligence.deals]);
 
     useEffect(() => {
         if (localIntelligence.deals.length === 0) {
             setModelIntel(null);
+            try {
+                sessionStorage.removeItem(DEAL_INTEL_SESSION_KEY);
+            } catch {}
             return;
         }
 
@@ -2574,9 +2755,34 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
                 });
                 if (!res.ok) throw new Error(`Deal intelligence failed with status ${res.status}`);
                 const data: DealIntelModelResponse = await res.json();
-                if (!ignore) setModelIntel(data);
+                if (!ignore) {
+                    setModelIntel(current => {
+                        const currentHasOutput = Boolean(current && ((current.alerts?.length || 0) > 0 || (current.monitor?.length || 0) > 0));
+                        const nextHasOutput = Boolean((data.alerts?.length || 0) > 0 || (data.monitor?.length || 0) > 0);
+                        const nextValue =
+                            nextHasOutput
+                                ? data
+                                : currentHasOutput
+                                ? {
+                                    ...current!,
+                                    authBlocked: data.authBlocked,
+                                    fallbackReason: data.fallbackReason,
+                                }
+                                : data;
+
+                        try {
+                            if (nextValue && (((nextValue.alerts?.length || 0) > 0) || ((nextValue.monitor?.length || 0) > 0) || nextValue.authBlocked)) {
+                                sessionStorage.setItem(DEAL_INTEL_SESSION_KEY, JSON.stringify(nextValue));
+                            }
+                        } catch {}
+
+                        return nextValue;
+                    });
+                }
             } catch {
-                if (!ignore) setModelIntel(null);
+                if (!ignore) {
+                    setModelIntel(current => current);
+                }
             }
         };
 
@@ -2588,17 +2794,28 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
     }, [localIntelligence.deals.length, modelPayload]);
 
     const intelligence = useMemo(() => {
-        if (!modelIntel) return localIntelligence;
+        const aiBase = {
+            ...localIntelligence,
+            deals: localIntelligence.deals.map(deal => ({
+                ...deal,
+                recovery: null,
+            })),
+            recoveryCount: 0,
+            alerts: [] as DealIntelAlert[],
+        };
+
+        if (!modelIntel) return aiBase;
 
         const monitorByDealId = new Map(modelIntel.monitor.map(entry => [entry.dealId, entry]));
 
         return {
-            ...localIntelligence,
-            deals: localIntelligence.deals.map(deal => ({
+            ...aiBase,
+            deals: aiBase.deals.map(deal => ({
                 ...deal,
-                recovery: monitorByDealId.get(deal.id) || deal.recovery,
+                recovery: monitorByDealId.get(deal.id) || null,
             })),
-            alerts: modelIntel.alerts.length > 0 ? modelIntel.alerts : localIntelligence.alerts,
+            recoveryCount: modelIntel.monitor.length,
+            alerts: modelIntel.alerts.length > 0 ? modelIntel.alerts : [],
         };
     }, [localIntelligence, modelIntel]);
 
@@ -2619,11 +2836,17 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
                 </div>
             </div>
 
+            {modelIntel?.authBlocked && modelIntel.fallbackReason && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+                    {modelIntel.fallbackReason} Update `backend/.env` with a Mistral API key, then restart the backend.
+                </div>
+            )}
+
             <div className="flex gap-4 flex-wrap">
                 <MetricCard label="Active Deals" value={String(intelligence.deals.length)} sub={formatDealValue(intelligence.pipelineValue)} />
                 <MetricCard label="At-Risk Deals" value={String(intelligence.atRiskDeals)} sub={intelligence.atRiskDeals === 0 ? "No active alerts" : "Needs recovery attention"} />
                 <MetricCard label="Avg. Health Score" value={intelligence.deals.length > 0 ? String(intelligence.avgHealth) : "--"} sub="/ 100" />
-                <MetricCard label="Recovery Plays Ready" value={String(intelligence.recoveryCount)} sub="Generated from CRM signals" />
+                <MetricCard label="Recovery Plays Ready" value={String(intelligence.recoveryCount)} sub={intelligence.recoveryCount === 0 ? "Waiting for AI output" : "Generated by the risk model"} />
                 <MetricCard label="Signals Detected" value={String(intelligence.signalCount)} sub="Across deals, calls, and meetings" />
             </div>
 
@@ -2665,9 +2888,13 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
                                 </div>
                             </div>
                             <div className="mt-2 flex flex-wrap gap-2">
-                                {d.signals.map(s => (
+                                {d.signals.length > 0 ? d.signals.map(s => (
                                     <span key={s} className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">{s}</span>
-                                ))}
+                                )) : (
+                                    <span className="px-2 py-0.5 bg-green-50 text-green-700 text-xs rounded-full">
+                                        No material risk signals detected from current CRM data
+                                    </span>
+                                )}
                             </div>
                             {d.recovery && (
                                 <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
@@ -2685,6 +2912,22 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
                                             </span>
                                         ))}
                                     </div>
+                                    {d.recovery.researchDetails && (
+                                        <div className="mt-3 grid gap-2 md:grid-cols-3">
+                                            <div className="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                                                <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Current Focus</div>
+                                                <div className="mt-1 text-xs text-gray-700">{d.recovery.researchDetails.currentFocus || "--"}</div>
+                                            </div>
+                                            <div className="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                                                <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Problem</div>
+                                                <div className="mt-1 text-xs text-gray-700">{d.recovery.researchDetails.problem || "--"}</div>
+                                            </div>
+                                            <div className="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                                                <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">How We Help</div>
+                                                <div className="mt-1 text-xs text-gray-700">{d.recovery.researchDetails.helpAngle || "--"}</div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -2719,7 +2962,7 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
                     <SectionHeader title="Agent Alerts" description="Latest risk signals generated from CRM activity and deal coverage" />
                     {intelligence.alerts.length === 0 ? (
-                        <p className="text-xs text-gray-400">No alerts yet. As deals and activity are added, this panel will surface the highest-priority warnings.</p>
+                        <p className="text-xs text-gray-400">No AI-generated alerts yet. Add live deal activity and a Mistral API key to generate alert text here.</p>
                     ) : (
                         <div className="space-y-3">
                             {intelligence.alerts.map((a, i) => (
@@ -2771,20 +3014,57 @@ const dealPriorityTone = (priority: string) => {
 };
 
 const parseDealValue = (value: string) => {
-    const numeric = Number(String(value || "").replace(/[^0-9.]/g, ""));
+    const raw = String(value || "").trim().replace(/,/g, "");
+    if (!raw) return 0;
+
+    const lakhMatch = raw.match(/(-?\d+(?:\.\d+)?)\s*(lakh|lac|lakhs|lacs)\b/i);
+    if (lakhMatch) return Number(lakhMatch[1]) * 100000;
+
+    const croreMatch = raw.match(/(-?\d+(?:\.\d+)?)\s*(crore|crores|cr)\b/i);
+    if (croreMatch) return Number(croreMatch[1]) * 10000000;
+
+    const numeric = Number(raw.replace(/[^0-9.-]/g, ""));
     return Number.isFinite(numeric) ? numeric : 0;
 };
 
 const parseDealDays = (value: string) => {
-    const match = String(value || "").match(/(\d+)/);
-    return match ? Number(match[1]) : 0;
+    const raw = String(value || "").trim().toLowerCase().replace(/,/g, "");
+    const match = raw.match(/-?\d+(?:\.\d+)?/);
+    if (!match) return 0;
+
+    let numeric = Number(match[0]);
+    if (!Number.isFinite(numeric)) return 0;
+
+    if (/\bweek/.test(raw)) numeric *= 7;
+    else if (/\bmonth/.test(raw)) numeric *= 30.4375;
+    else if (/\byear/.test(raw)) numeric *= 365.25;
+
+    return numeric;
 };
+
+const createLocalDate = (year: number, monthIndex: number, day: number) => {
+    const date = new Date(year, monthIndex, day, 12, 0, 0, 0);
+    return date.getFullYear() === year && date.getMonth() === monthIndex && date.getDate() === day
+        ? date
+        : null;
+};
+
+const formatDayCount = (value: number) => {
+    if (!Number.isFinite(value)) return "0 days";
+    const rounded = Math.round(value * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)} days`;
+};
+
+const formatAbsoluteDate = (date: Date | null) =>
+    date
+        ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(date)
+        : "TBD";
 
 const formatDealValue = (value: number) =>
     new Intl.NumberFormat("en-IN", {
         style: "currency",
         currency: "INR",
-        maximumFractionDigits: 0,
+        maximumFractionDigits: 2,
     }).format(value);
 
 const readStoredRows = (key: string): TableRow[] => {
@@ -2810,18 +3090,37 @@ const parseLooseDate = (value: unknown) => {
     const raw = String(value || "").trim();
     if (!hasMeaningfulValue(raw)) return null;
 
-    const parsed = Date.parse(raw);
-    if (!Number.isNaN(parsed)) return new Date(parsed);
+    const isoMatch = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+    if (isoMatch) {
+        return createLocalDate(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+    }
+
+    const dmyMatch = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+    if (dmyMatch) {
+        const year = Number(dmyMatch[3].length === 2 ? `20${dmyMatch[3]}` : dmyMatch[3]);
+        return createLocalDate(year, Number(dmyMatch[2]) - 1, Number(dmyMatch[1]));
+    }
 
     const currentYear = new Date().getFullYear();
-    const parsedWithYear = Date.parse(`${raw}, ${currentYear}`);
-    if (!Number.isNaN(parsedWithYear)) return new Date(parsedWithYear);
+    const monthDayWithYear = Date.parse(`${raw}, ${currentYear}`);
+    if (!Number.isNaN(monthDayWithYear)) {
+        const parsed = new Date(monthDayWithYear);
+        return createLocalDate(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+    }
+
+    const parsed = Date.parse(raw);
+    if (!Number.isNaN(parsed)) {
+        const date = new Date(parsed);
+        return createLocalDate(date.getFullYear(), date.getMonth(), date.getDate());
+    }
 
     return null;
 };
 
+const startOfLocalDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
 const daysBetween = (target: Date, base = new Date()) =>
-    Math.round((target.getTime() - base.getTime()) / 86400000);
+    Math.round((startOfLocalDay(target).getTime() - startOfLocalDay(base).getTime()) / 86400000);
 
 const formatRelativeDayLabel = (date: Date | null) => {
     if (!date) return "No dated activity";
@@ -2835,6 +3134,22 @@ const formatRelativeDayLabel = (date: Date | null) => {
 
 const extractParsedActivityDate = (row: TableRow) =>
     parseLooseDate(row["Date"] || row["Meeting date"] || row["Call date"]);
+
+const getExpectedCloseDate = (deal: DealRecord) => parseLooseDate(deal.expectedClose);
+
+const getDaysUntilExpectedClose = (deal: DealRecord) => {
+    const closeDate = getExpectedCloseDate(deal);
+    if (closeDate) return daysBetween(closeDate);
+
+    const durationDays = parseDealDays(deal.duration);
+    return durationDays > 0 ? Math.round(durationDays) : null;
+};
+
+const getEarliestExpectedClose = (deals: DealRecord[]) =>
+    deals
+        .map(getExpectedCloseDate)
+        .filter((date): date is Date => Boolean(date))
+        .sort((a, b) => a.getTime() - b.getTime())[0] || null;
 
 const upsertAgentResults = (current: AgentResult[], incoming: AgentResult) => {
     const nextKey = normaliseLookupKey(incoming.companyName);
@@ -2949,12 +3264,13 @@ function DealsTableSection({
     updateDeal: (id: number, field: keyof DealRecord, value: string) => void;
 }) {
     const totalValue = deals.reduce((sum, deal) => sum + parseDealValue(deal.value), 0);
-    const avgCycle = deals.length
-        ? Math.round(deals.reduce((sum, deal) => sum + parseDealDays(deal.duration), 0) / deals.length)
+    const cycleValues = deals
+        .map(deal => parseDealDays(deal.duration))
+        .filter(value => Number.isFinite(value) && value >= 0);
+    const avgCycle = cycleValues.length
+        ? cycleValues.reduce((sum, value) => sum + value, 0) / cycleValues.length
         : 0;
-    const nextClose = deals
-        .map(deal => deal.expectedClose)
-        .find(value => value && value !== "TBD") || "TBD";
+    const nextClose = formatAbsoluteDate(getEarliestExpectedClose(deals));
     const visibleDealIds = deals.map(deal => deal.id);
     const allVisibleDealsSelected = visibleDealIds.length > 0 && visibleDealIds.every(id => selectedDealIds.includes(id));
     const someVisibleDealsSelected = visibleDealIds.some(id => selectedDealIds.includes(id)) && !allVisibleDealsSelected;
@@ -3114,7 +3430,7 @@ function DealsTableSection({
                         </div>
                         <div className="rounded-lg border border-white bg-white px-3 py-2 shadow-sm">
                             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400">Average cycle</div>
-                            <div className="mt-1 text-sm font-bold text-gray-900">{avgCycle} days</div>
+                            <div className="mt-1 text-sm font-bold text-gray-900">{formatDayCount(avgCycle)}</div>
                         </div>
                         <div className="rounded-lg border border-white bg-white px-3 py-2 shadow-sm">
                             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400">Next close</div>
@@ -3255,7 +3571,10 @@ function DealsView() {
     const wonDeals = filteredDeals.filter(deal => deal.status === "won");
     const activePipelineValue = activeDeals.reduce((sum, deal) => sum + parseDealValue(deal.value), 0);
     const highPriorityDeals = activeDeals.filter(deal => deal.priority === "High").length;
-    const closingSoonDeals = activeDeals.filter(deal => parseDealDays(deal.duration) <= 14).length;
+    const closingSoonDeals = activeDeals.filter(deal => {
+        const daysUntilClose = getDaysUntilExpectedClose(deal);
+        return daysUntilClose !== null && daysUntilClose >= 0 && daysUntilClose <= 14;
+    }).length;
     const wonRevenue = wonDeals.reduce((sum, deal) => sum + parseDealValue(deal.value), 0);
 
     return (
@@ -3601,7 +3920,6 @@ function PlaceholderView({ title, desc }: { title: string; desc: string }) {
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Root Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export default function CRMDashboard() {
-    const [bannerVisible, setBannerVisible] = useState(true);
     const [searchValue, setSearchValue] = useState("");
     const [activeNav, setActiveNav] = useState("companies");
 
@@ -3693,19 +4011,136 @@ export default function CRMDashboard() {
         setIsProspecting(false);
     };
 
-    // â”€â”€ Interactive Gmail Connect State â”€â”€
-    const [isConnectingGmail, setIsConnectingGmail] = useState(false);
-    const [isGmailConnected, setIsGmailConnected] = useState(false);
+    const [showEmailProviderModal, setShowEmailProviderModal] = useState(false);
+    const [emailProvider, setEmailProvider] = useState<EmailProviderConfig | null>(() => {
+        try {
+            const stored = localStorage.getItem("custbuds_email_provider");
+            return stored ? JSON.parse(stored) : null;
+        } catch {
+            return null;
+        }
+    });
 
-    const handleConnectGmail = () => {
-        setIsConnectingGmail(true);
-        // Simulate OAuth wait
-        setTimeout(() => {
-            setIsConnectingGmail(false);
-            setIsGmailConnected(true);
-            // Hide banner after 2 seconds of showing connected state
-            setTimeout(() => setBannerVisible(false), 2000);
-        }, 1500);
+    useEffect(() => {
+        try {
+            if (emailProvider) localStorage.setItem("custbuds_email_provider", JSON.stringify(emailProvider));
+            else localStorage.removeItem("custbuds_email_provider");
+        } catch {}
+    }, [emailProvider]);
+
+    const handleSaveEmailProvider = (config: EmailProviderConfig) => {
+        setEmailProvider(config);
+        setShowEmailProviderModal(false);
+    };
+
+    const findProspectRecipient = (result: AgentResult) => {
+        const lookupCompany = normaliseLookupKey(result.companyName);
+        const lookupContact = normaliseLookupKey(result.enrichedProfile?.key_contact?.name || "");
+
+        try {
+            const contacts = JSON.parse(localStorage.getItem("custbuds_contacts") || "[]") as TableRow[];
+            const contactMatch = contacts.find(contact => normaliseLookupKey(contact["Name"]) === lookupContact);
+            if (contactMatch && hasMeaningfulValue(contactMatch["Email"])) return String(contactMatch["Email"]);
+        } catch {}
+
+        try {
+            const companies = JSON.parse(localStorage.getItem("custbuds_companies") || "[]") as TableRow[];
+            const companyMatch = companies.find(company => normaliseLookupKey(company["Company name"]) === lookupCompany);
+            if (companyMatch && hasMeaningfulValue(companyMatch["Email ID"])) return String(companyMatch["Email ID"]);
+        } catch {}
+
+        return "";
+    };
+
+    const handleRegenerateProspect = async (result: AgentResult) => {
+        setIsProspecting(true);
+
+        try {
+            let companyRecord: TableRow | null = null;
+            try {
+                const companies = JSON.parse(localStorage.getItem("custbuds_companies") || "[]") as TableRow[];
+                companyRecord = companies.find(company => normaliseLookupKey(company["Company name"]) === normaliseLookupKey(result.companyName)) || null;
+            } catch {}
+
+            const res = await fetch("http://localhost:5000/api/agent/prospect", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    companyName: result.companyName,
+                    city: companyRecord?.["City"] || "",
+                    companySize: companyRecord?.["Company Size"] || result.enrichedProfile?.headcount_range || "",
+                    type: companyRecord?.["Type"] || "Prospect",
+                    owner: result.enrichedProfile?.key_contact?.name || "",
+                }),
+            });
+
+            if (!res.ok) throw new Error(`status ${res.status}`);
+
+            const data: AgentResult = await res.json();
+            handleAgentResult({ ...data, companyName: result.companyName });
+            return `Regenerated outreach for ${result.companyName}.`;
+        } catch {
+            setIsProspecting(false);
+            return `Couldn't regenerate ${result.companyName} right now.`;
+        }
+    };
+
+    const handleStartSequence = async (result: AgentResult, emailKey: "email1" | "email2") => {
+        const draft = parseEmailDraft(result[emailKey] || "");
+        const recipient = findProspectRecipient(result);
+        const activeProvider = emailProvider?.provider || "Other";
+        const bodyWithSignature = [draft.body, emailProvider?.signature || ""].filter(Boolean).join("\n\n");
+        const composeUrl = buildComposeUrl({
+            provider: activeProvider,
+            to: recipient,
+            subject: draft.subject,
+            body: bodyWithSignature,
+        });
+
+        window.open(composeUrl, "_blank", "noopener,noreferrer");
+
+        try {
+            const history = JSON.parse(localStorage.getItem("custbuds_email_sequences") || "[]");
+            history.unshift({
+                id: Date.now(),
+                companyName: result.companyName,
+                provider: activeProvider,
+                recipient,
+                emailKey,
+                subject: draft.subject,
+                status: "draft-opened",
+                createdAt: new Date().toISOString(),
+            });
+            localStorage.setItem("custbuds_email_sequences", JSON.stringify(history.slice(0, 50)));
+        } catch {}
+
+        return recipient
+            ? `Opened draft for ${result.companyName} to ${recipient}.`
+            : `Opened draft for ${result.companyName}.`;
+    };
+
+    const handleScheduleSequence = async (result: AgentResult, emailKey: "email1" | "email2", scheduledFor: string) => {
+        const draft = parseEmailDraft(result[emailKey] || "");
+        const recipient = findProspectRecipient(result);
+        const activeProvider = emailProvider?.provider || "Other";
+
+        try {
+            const scheduled = JSON.parse(localStorage.getItem("custbuds_scheduled_sequences") || "[]");
+            scheduled.unshift({
+                id: Date.now(),
+                companyName: result.companyName,
+                provider: activeProvider,
+                recipient,
+                emailKey,
+                subject: draft.subject,
+                scheduledFor,
+                status: "scheduled",
+                createdAt: new Date().toISOString(),
+            });
+            localStorage.setItem("custbuds_scheduled_sequences", JSON.stringify(scheduled.slice(0, 50)));
+        } catch {}
+
+        return `Scheduled ${result.companyName} for ${new Date(scheduledFor).toLocaleString("en-IN")}.`;
     };
 
     const crmNav = [
@@ -3855,49 +4290,13 @@ export default function CRMDashboard() {
 
                 <main className="flex-1 overflow-y-auto bg-slate-50">
                     <div className="p-6 space-y-4 max-w-screen-xl mx-auto">
-                        {bannerVisible && (
-                            <div className="relative bg-white rounded-lg border border-gray-200 px-5 py-4 shadow-sm">
-                                <button
-                                    onClick={() => setBannerVisible(false)}
-                                    className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-100"
-                                >
-                                    <XIcon />
-                                </button>
-                                <p className="text-sm font-bold text-gray-900 mb-1 pr-6">
-                                    Connect your email to sync all your contacts and conversations
-                                    in one place
-                                </p>
-                                <p className="text-xs text-gray-500 leading-relaxed mb-3">
-                                    CustBuds uses this connection to organize communication history
-                                    and enrich profiles with accurate job titles, locations, and
-                                    more.
-                                </p>
-                                <button
-                                    onClick={handleConnectGmail}
-                                    disabled={isConnectingGmail || isGmailConnected}
-                                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded border text-xs font-medium transition-colors ${
-                                        isGmailConnected ? "bg-green-50 border-green-200 text-green-700" :
-                                        isConnectingGmail ? "bg-gray-100 border-gray-200 text-gray-500 cursor-wait" :
-                                        "border-gray-300 text-gray-700 hover:bg-gray-50"
-                                    }`}
-                                >
-                                    {isConnectingGmail ? (
-                                        <>
-                                            <div className="w-3 h-3 rounded-full border-2 border-gray-300 border-t-gray-500 animate-spin" />
-                                            Connecting...
-                                        </>
-                                    ) : isGmailConnected ? (
-                                        <>Connected</>
-                                    ) : (
-                                        <>
-                                            <GmailIcon />
-                                            Connect Gmail
-                                        </>
-                                    )}
-                                </button>
-                            </div>
+                        {showEmailProviderModal && (
+                            <EmailProviderModal
+                                initialValue={emailProvider}
+                                onClose={() => setShowEmailProviderModal(false)}
+                                onSave={handleSaveEmailProvider}
+                            />
                         )}
-
                         {/* â”€â”€ Prospecting Loading Banner â”€â”€ */}
                         {isProspecting && (
                             <div className="flex items-center gap-3 px-5 py-3.5 rounded-xl border border-sky-200 shadow-sm"
@@ -3913,6 +4312,11 @@ export default function CRMDashboard() {
                             <AgentResultPanel
                                 result={agentResult}
                                 onClose={() => setAgentResult(null)}
+                                emailProvider={emailProvider}
+                                onConnectProvider={() => setShowEmailProviderModal(true)}
+                                onRegenerate={handleRegenerateProspect}
+                                onStartSequence={handleStartSequence}
+                                onScheduleSequence={handleScheduleSequence}
                             />
                         )}
 
