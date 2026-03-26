@@ -1,17 +1,50 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+﻿import React, { useState, useEffect, useRef, useMemo } from "react";
 
-// ── TableRow type ────────────────────────────────────────────
+// â”€â”€ TableRow type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type TableRow = {
     id: number;
     [key: string]: any;
 };
 
-// ── Agent Result type — mirrors the JSON returned by /api/agent/prospect ──
+// â”€â”€ Agent Result type â€” mirrors the JSON returned by /api/agent/prospect â”€â”€
 type AgentResult = {
     fitScore: number;
     scoreReasoning: string;
     email1: string;
     email2: string;
+    researchSummary?: string;
+    publicSignals?: {
+        label: string;
+        detail: string;
+        source?: string;
+        impact?: string;
+    }[];
+    fitBreakdown?: {
+        label: string;
+        score: number;
+        summary: string;
+    }[];
+    buyerPersonas?: {
+        name: string;
+        title: string;
+        why: string;
+    }[];
+    sequence?: {
+        step: string;
+        channel: string;
+        timing: string;
+        objective: string;
+        message: string;
+    }[];
+    callOpener?: string;
+    messagingAdjustments?: {
+        signal: string;
+        adjustment: string;
+        talkingPoints: string[];
+    }[];
+    nextActions?: string[];
+    generatedAt?: string;
+    fallback?: boolean;
     enrichedProfile?: {
         recent_news: string;
         tech_stack: string[];
@@ -37,10 +70,46 @@ type DealRecord = {
     status: "active" | "won";
 };
 
-/* ═══════════════════════════════════════════════════════
+type DealIntelRecovery = {
+    headline: string;
+    action: string;
+    talkingPoints: string[];
+};
+
+type DealIntelRecord = {
+    id: number;
+    name: string;
+    value: string;
+    stage: string;
+    health: number;
+    risk: "High" | "Medium" | "Low";
+    signals: string[];
+    owner: string;
+    close: string;
+    company: string;
+    contact: string;
+    activityCount: number;
+    lastActivityLabel: string;
+    heatmapBars: number[];
+    recovery: DealIntelRecovery | null;
+};
+
+type DealIntelAlert = {
+    icon: string;
+    msg: string;
+    time: string;
+    tone: "danger" | "info" | "positive";
+};
+
+type DealHeatmapRow = {
+    name: string;
+    bars: number[];
+};
+
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PROSPECTING AGENT RESULT PANEL
    Rendered in the main content area after the agent runs.
-═══════════════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: () => void }) {
     const [activeEmail, setActiveEmail] = useState<"email1" | "email2">("email1");
     const [copied, setCopied] = useState(false);
@@ -99,15 +168,36 @@ function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: (
                     </div>
                 </div>
 
+                {result.researchSummary && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Research Summary</div>
+                        <p className="text-sm text-gray-700 leading-relaxed">{result.researchSummary}</p>
+                    </div>
+                )}
+
                 {/* Enriched intel pills */}
                 {result.enrichedProfile && (
                     <div className="flex flex-wrap gap-2">
-                        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">🏭 {result.enrichedProfile.industry}</span>
-                        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">👥 {result.enrichedProfile.headcount_range}</span>
-                        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">👤 {result.enrichedProfile.key_contact.name} · {result.enrichedProfile.key_contact.title}</span>
+                        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Industry: {result.enrichedProfile.industry}</span>
+                        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Team: {result.enrichedProfile.headcount_range}</span>
+                        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Contact: {result.enrichedProfile.key_contact.name} - {result.enrichedProfile.key_contact.title}</span>
                         {result.enrichedProfile.tech_stack.slice(0, 3).map(t => (
                             <span key={t} className="px-2.5 py-1 bg-slate-50 text-slate-600 text-xs rounded-full font-medium">{t}</span>
                         ))}
+                    </div>
+                )}
+
+                {result.publicSignals && result.publicSignals.length > 0 && (
+                    <div className="space-y-2">
+                        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Public Signals</div>
+                        <div className="grid gap-2 md:grid-cols-3">
+                            {result.publicSignals.slice(0, 3).map((signal, index) => (
+                                <div key={`${signal.label}-${index}`} className="rounded-xl border border-sky-100 bg-sky-50/60 p-3">
+                                    <div className="text-xs font-semibold text-sky-700">{signal.label}</div>
+                                    <p className="mt-1 text-xs text-gray-600 leading-relaxed">{signal.detail}</p>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 )}
 
@@ -121,7 +211,7 @@ function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: (
                                         ? "text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
                                 }`}
                                 style={activeEmail === "email1" ? { background: "#0ea5e9" } : {}}>
-                                Email 1 — Cold Outreach
+                                Email 1 - Cold Outreach
                             </button>
                             <button onClick={() => setActiveEmail("email2")}
                                 className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
@@ -129,12 +219,12 @@ function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: (
                                         ? "text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
                                 }`}
                                 style={activeEmail === "email2" ? { background: "#0ea5e9" } : {}}>
-                                Email 2 — Follow-up
+                                Email 2 - Follow-up
                             </button>
                         </div>
                         <button onClick={copyToClipboard}
                             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
-                            {copied ? "✓ Copied" : "Copy"}
+                            {copied ? "Copied" : "Copy"}
                         </button>
                     </div>
 
@@ -144,20 +234,48 @@ function AgentResultPanel({ result, onClose }: { result: AgentResult; onClose: (
                     </div>
                 </div>
 
+                {result.messagingAdjustments && result.messagingAdjustments.length > 0 && (
+                    <div className="space-y-2">
+                        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Adaptive Messaging</div>
+                        <div className="space-y-2">
+                            {result.messagingAdjustments.slice(0, 2).map((item, index) => (
+                                <div key={`${item.signal}-${index}`} className="rounded-xl border border-amber-100 bg-amber-50 p-3">
+                                    <div className="text-xs font-semibold text-amber-700">{item.signal}</div>
+                                    <p className="mt-1 text-xs text-gray-700">{item.adjustment}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {result.nextActions && result.nextActions.length > 0 && (
+                    <div className="rounded-xl border border-gray-200 bg-white p-4">
+                        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Next Actions</div>
+                        <div className="space-y-1.5">
+                            {result.nextActions.slice(0, 3).map((action, index) => (
+                                <div key={`${action}-${index}`} className="flex items-start gap-2 text-sm text-gray-700">
+                                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-sky-500 flex-shrink-0" />
+                                    <span>{action}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {/* CTAs */}
                 <div className="flex gap-2 pt-1">
                     <button className="px-4 py-2 text-sm font-semibold text-white rounded-lg hover:opacity-90 transition-opacity"
                         style={{ background: "#0ea5e9" }}
-                        onClick={() => alert("Sequence started! (Connect to your email provider)")}>▶ Start Sequence</button>
-                    <button className="px-4 py-2 text-sm font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 transition-colors">↻ Regenerate</button>
-                    <button className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors">📅 Schedule</button>
+                        onClick={() => alert("Sequence started! (Connect to your email provider)")}>Start Sequence</button>
+                    <button className="px-4 py-2 text-sm font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 transition-colors">Regenerate</button>
+                    <button className="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors">Schedule</button>
                 </div>
             </div>
         </div>
     );
 }
 
-/* ───────── Icons ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Icons â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const DealsIcon = () => (
     <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
         <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
@@ -247,7 +365,7 @@ const HubSpotLogoIcon = () => (
     </svg>
 );
 
-/* ───────── Editable Cell ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Editable Cell â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function EditableCell({ value, onChange, className = "", link = false }: {
     value: string;
     onChange: (val: string) => void;
@@ -311,7 +429,7 @@ function EditableCell({ value, onChange, className = "", link = false }: {
     );
 }
 
-/* ───────── Create Company Modal ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Create Company Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function CreateCompanyModal({ onClose, onSave, onAgentStart, onAgentResult }: {
     onClose: () => void;
     onSave: (form: any) => void;
@@ -419,7 +537,7 @@ function CreateCompanyModal({ onClose, onSave, onAgentStart, onAgentResult }: {
                             type="text"
                             value={form.revenue}
                             onChange={set("revenue")}
-                            placeholder="$1,000,000"
+                            placeholder="Rs 10,00,000"
                             className="w-full border border-gray-200 rounded px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-sky-400 bg-white transition-colors"
                         />
                     </div>
@@ -548,7 +666,7 @@ function CreateCompanyModal({ onClose, onSave, onAgentStart, onAgentResult }: {
     );
 }
 
-/* ───────── CSV/Excel Import Modal ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ CSV/Excel Import Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function ImportModal({ columns, onClose, onImport }: {
     columns: string[];
     onClose: () => void;
@@ -613,7 +731,7 @@ function ImportModal({ columns, onClose, onImport }: {
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100"><XIcon size="w-5 h-5" /></button>
                 </div>
                 <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-                    <p className="text-xs text-gray-500">Upload a <strong>CSV</strong> file. The first row must be a header row matching the table columns (e.g. <em>{columns.slice(0, 3).join(", ")}</em>…). Data rows below will be auto-sorted into the correct columns.</p>
+                    <p className="text-xs text-gray-500">Upload a <strong>CSV</strong> file. The first row must be a header row matching the table columns (e.g. <em>{columns.slice(0, 3).join(", ")}</em>...). Data rows below will be auto-sorted into the correct columns.</p>
                     <div
                         className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-orange-400 transition-colors"
                         onClick={() => fileRef.current?.click()}
@@ -629,14 +747,14 @@ function ImportModal({ columns, onClose, onImport }: {
                     {error && <p className="text-xs text-red-500 font-medium">{error}</p>}
                     {preview && (
                         <div className="space-y-2">
-                            <p className="text-xs text-green-600 font-semibold">✓ Detected {preview.rows.length} data row(s) with columns: {preview.headers.join(", ")}</p>
+                            <p className="text-xs text-green-600 font-semibold">Detected {preview.rows.length} data row(s) with columns: {preview.headers.join(", ")}</p>
                             <div className="overflow-x-auto border border-gray-200 rounded">
                                 <table className="text-xs w-full min-w-max">
                                     <thead><tr className="bg-gray-50 border-b">{preview.headers.map(h => <th key={h} className="px-2 py-1.5 text-left text-gray-500 font-medium whitespace-nowrap">{h}</th>)}</tr></thead>
                                     <tbody>{preview.rows.slice(0, 4).map((r, i) => <tr key={i} className="border-b border-gray-100">{r.map((c, j) => <td key={j} className="px-2 py-1 text-gray-700 whitespace-nowrap">{c}</td>)}</tr>)}</tbody>
                                 </table>
                             </div>
-                            {preview.rows.length > 4 && <p className="text-xs text-gray-400">…and {preview.rows.length - 4} more rows</p>}
+                            {preview.rows.length > 4 && <p className="text-xs text-gray-400">...and {preview.rows.length - 4} more rows</p>}
                         </div>
                     )}
                 </div>
@@ -649,7 +767,7 @@ function ImportModal({ columns, onClose, onImport }: {
     );
 }
 
-/* ───────── Create Contact Modal ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Create Contact Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function CreateContactModal({ onClose, onSave }: { onClose: () => void; onSave: (form: any) => void; }) {
     const [form, setForm] = useState({ email: "", firstName: "", lastName: "", jobTitle: "", phone: "" });
     const set = (k: string) => (e: any) => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -696,18 +814,17 @@ function CreateContactModal({ onClose, onSave }: { onClose: () => void; onSave: 
     );
 }
 
-/* ───────── Contacts View ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Contacts View â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const CONTACTS_KEY = "custbuds_contacts";
 const CONTACTS_COLS_KEY = "custbuds_contacts_cols";
 
 function ContactsView() {
-    const [activeTab, setActiveTab] = useState("all");
     const [tableSearch, setTableSearch] = useState("");
     const [showImport, setShowImport] = useState(false);
     const [showCreateContact, setShowCreateContact] = useState(false);
     const [showAddMenu, setShowAddMenu] = useState(false);
 
-    // ── Pagination State ──
+    // â”€â”€ Pagination State â”€â”€
     const [pageSize, setPageSize] = useState(25);
     const [currentPage, setCurrentPage] = useState(1);
     const [showPageSizeMenu, setShowPageSizeMenu] = useState(false);
@@ -823,7 +940,7 @@ function ContactsView() {
         <>
             {showImport && <ImportModal columns={columns} onClose={() => setShowImport(false)} onImport={handleImport} />}
             {showCreateContact && <CreateContactModal onClose={() => setShowCreateContact(false)} onSave={handleSaveContact} />}
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="flex items-center justify-between px-4 pt-4 pb-0">
                     <button className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 hover:text-gray-600">Contacts <ChevronDownIcon /></button>
                     <div className="relative">
@@ -852,22 +969,12 @@ function ContactsView() {
                 </div>
 
                 <div className="flex items-center border-b border-gray-200 px-4 mt-2 gap-0.5">
-                    {[
-                        { id: "all", label: "All contacts", badge: filtered.length },
-                        { id: "my", label: "My contacts" },
-                        { id: "unassigned", label: "Unassigned contacts" },
-                    ].map(tab => (
-                        <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                            className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.id ? "border-sky-500 text-sky-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
-                            {tab.label}
-                            {tab.badge !== undefined && (
-                                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-xs font-semibold"
-                                    style={{ background: activeTab === tab.id ? "#0ea5e9" : "#e0f2fe", color: activeTab === tab.id ? "white" : "#0369a1" }}>
-                                    {tab.badge}
-                                </span>
-                            )}
-                        </button>
-                    ))}
+                    <div className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 border-sky-500 text-sky-600">
+                        <span>All contacts</span>
+                        <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-xs font-semibold bg-sky-500 text-white">
+                            {filtered.length}
+                        </span>
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 flex-wrap">
@@ -878,35 +985,6 @@ function ContactsView() {
                     </div>
                     <button className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">Table view <ChevronDownIcon /></button>
                     <div className="flex items-center gap-1.5 ml-auto">
-                        <div className="relative">
-                            <button onClick={() => setShowEditCols(v => !v)} className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm">
-                                Edit columns
-                            </button>
-                            {showEditCols && (
-                                <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-lg z-20 p-2">
-                                    <div className="flex gap-1 mb-2">
-                                        <input value={newColName} onChange={e => setNewColName(e.target.value)} placeholder="New column name" className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-sky-400" />
-                                        <button onClick={() => {
-                                            if (!newColName.trim() || columns.includes(newColName.trim())) return;
-                                            setColumns([...columns, newColName.trim()]);
-                                            setNewColName("");
-                                        }} className="px-2 py-1 bg-sky-500 text-white text-xs rounded hover:bg-sky-600">Add</button>
-                                    </div>
-                                    <div className="text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1 px-1">Active Columns</div>
-                                    <div className="max-h-40 overflow-y-auto pr-1">
-                                        {columns.map(c => (
-                                            <div key={c} className="flex items-center justify-between px-1.5 py-1.5 text-xs text-gray-700 hover:bg-gray-50 rounded group/col">
-                                                <span className="truncate">{c}</span>
-                                                <button onClick={() => deleteCol(c)} className="opacity-0 group-hover/col:opacity-100 text-gray-400 hover:text-red-500"><XIcon size="w-3 h-3" /></button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        <button className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm">Filters</button>
-                        
                         <div className="relative">
                             <button onClick={() => setShowSort(v => !v)} className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm flex items-center gap-1">
                                 Sort {sortRule.col && <span className="text-sky-600 font-bold ml-1">({sortRule.col})</span>}
@@ -921,7 +999,7 @@ function ContactsView() {
                                         }} className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between">
                                             {opt}
                                             {sortRule.col === opt && (
-                                                <span className="text-sky-500 font-bold">{sortRule.asc ? "↑" : "↓"}</span>
+                                                <span className="text-sky-500 font-bold">{sortRule.asc ? "ASC" : "DESC"}</span>
                                             )}
                                         </button>
                                     ))}
@@ -935,17 +1013,16 @@ function ContactsView() {
                         </div>
 
                         <button onClick={exportExcel} className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm">Export</button>
-                        <button className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm">Save</button>
                     </div>
                 </div>
 
                 <div style={{ overflowX: 'auto', width: '100%' }}>
-                    <table style={{ minWidth: 'max-content', width: '100%' }} className="text-sm border-collapse border border-gray-300">
+                    <table style={{ minWidth: 'max-content', width: '100%' }} className="text-sm border-collapse">
                         <thead>
-                            <tr className="bg-slate-50 border-b border-gray-300">
-                                <th className="w-8 px-2 py-1.5 border-r border-gray-300 bg-slate-50 sticky left-0 z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></th>
+                            <tr className="bg-slate-50 border-b border-gray-200">
+                                <th className="w-8 px-2 py-2.5 border-r border-gray-200 bg-slate-50 sticky left-0 z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></th>
                                 {columns.map(h => (
-                                    <th key={h} className="px-3 py-1.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap border-r border-gray-300">
+                                    <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap border-r border-gray-200">
                                         {h}
                                     </th>
                                 ))}
@@ -953,10 +1030,10 @@ function ContactsView() {
                         </thead>
                         <tbody>
                             {paginatedData.map((c: any) => (
-                                <tr key={c.id} className="border-b border-gray-200 hover:bg-sky-50/30 transition-colors group">
-                                    <td className="w-8 px-2 py-1.5 border-r border-gray-200 bg-white group-hover:bg-sky-50/30 sticky left-0 text-center align-middle transition-colors z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></td>
+                                <tr key={c.id} className="border-b border-gray-100 hover:bg-sky-50/20 transition-colors group">
+                                    <td className="w-8 px-2 py-3 border-r border-gray-200 bg-white group-hover:bg-sky-50/20 sticky left-0 text-center align-middle transition-colors z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></td>
                                     {columns.map((col, ci) => (
-                                        <td key={col} className="px-3 py-1.5 border-r border-gray-200 relative">
+                                        <td key={col} className="px-3 py-3 border-r border-gray-200 relative">
                                             {ci === 0 ? (
                                                 <div className="flex items-center gap-2">
                                                     <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 border border-gray-200"><HubSpotLogoIcon /></div>
@@ -989,7 +1066,7 @@ function ContactsView() {
                             disabled={safeCurrentPage === 1}
                             className={`px-2.5 py-1 text-xs font-medium ${safeCurrentPage === 1 ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:text-gray-900'}`}
                         >
-                            ‹ Prev
+                            {"< Prev"}
                         </button>
                         
                         {Array.from({ length: totalPages }, (_, i) => i + 1).map(pageNum => (
@@ -1008,7 +1085,7 @@ function ContactsView() {
                             disabled={safeCurrentPage === totalPages}
                             className={`px-2.5 py-1 text-xs font-medium ${safeCurrentPage === totalPages ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:text-gray-900'}`}
                         >
-                            Next ›
+                            {"Next >"}
                         </button>
                     </div>
                     
@@ -1039,15 +1116,14 @@ function ContactsView() {
     );
 }
 
-/* ───────── Companies View ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Companies View â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => void, onAgentResult?: (r: AgentResult | null) => void }) {
-    const [activeTab, setActiveTab] = useState("all");
     const [tableSearch, setTableSearch] = useState("");
     const [showAddMenu, setShowAddMenu] = useState(false);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showImport, setShowImport] = useState(false);
 
-    // ── Pagination State ──
+    // â”€â”€ Pagination State â”€â”€
     const [pageSize, setPageSize] = useState(25);
     const [currentPage, setCurrentPage] = useState(1);
     const [showPageSizeMenu, setShowPageSizeMenu] = useState(false);
@@ -1199,9 +1275,9 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
         <>
             {showCreateModal && <CreateCompanyModal onClose={() => setShowCreateModal(false)} onSave={handleSaveNew} onAgentStart={onAgentStart} onAgentResult={onAgentResult} />}
             {showImport && <ImportModal columns={columns} onClose={() => setShowImport(false)} onImport={handleImport} />}
-            {/* Note: CompaniesView passes onAgentResult through the dashboard — see CRMDashboard */}
+            {/* Note: CompaniesView passes onAgentResult through the dashboard â€” see CRMDashboard */}
 
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="flex items-center justify-between px-4 pt-4 pb-0">
                     <button className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 hover:text-gray-600">
                         Companies <ChevronDownIcon />
@@ -1231,32 +1307,12 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                 </div>
 
                 <div className="flex items-center border-b border-gray-200 px-4 mt-2">
-                    {[
-                        { id: "all", label: "All companies", badge: filtered.length },
-                        { id: "my", label: "My companies" },
-                    ].map((tab) => (
-                        <button
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
-                            className={`flex items-center gap-1.5 px-1 py-2.5 text-sm font-medium border-b-2 mr-4 transition-colors ${activeTab === tab.id
-                                ? "border-sky-500 text-sky-600"
-                                : "border-transparent text-gray-500 hover:text-gray-700"
-                                }`}
-                        >
-                            {tab.label}
-                            {tab.badge !== undefined && (
-                                <span
-                                    className="inline-flex items-center justify-center w-4 h-4 rounded-full text-xs font-semibold"
-                                    style={{
-                                        background: activeTab === tab.id ? "#e0f2fe" : "#f3f4f6",
-                                        color: activeTab === tab.id ? "#0284c7" : "#6b7280",
-                                    }}
-                                >
-                                    {tab.badge}
-                                </span>
-                            )}
-                        </button>
-                    ))}
+                    <div className="flex items-center gap-1.5 px-1 py-2.5 text-sm font-medium border-b-2 mr-4 border-sky-500 text-sky-600">
+                        <span>All companies</span>
+                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-xs font-semibold bg-sky-500 text-white">
+                            {filtered.length}
+                        </span>
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-2 px-4 py-3 flex-wrap">
@@ -1277,35 +1333,6 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                     </button>
                     <div className="flex items-center gap-1.5 ml-auto">
                         <div className="relative">
-                            <button onClick={() => setShowEditCols(v => !v)} className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm">
-                                Edit columns
-                            </button>
-                            {showEditCols && (
-                                <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-lg z-20 p-2">
-                                    <div className="flex gap-1 mb-2">
-                                        <input value={newColName} onChange={e => setNewColName(e.target.value)} placeholder="New column name" className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-sky-400" />
-                                        <button onClick={() => {
-                                            if (!newColName.trim() || columns.includes(newColName.trim())) return;
-                                            setColumns([...columns, newColName.trim()]);
-                                            setNewColName("");
-                                        }} className="px-2 py-1 bg-sky-500 text-white text-xs rounded hover:bg-sky-600">Add</button>
-                                    </div>
-                                    <div className="text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1 px-1">Active Columns</div>
-                                    <div className="max-h-40 overflow-y-auto pr-1">
-                                        {columns.map(c => (
-                                            <div key={c} className="flex items-center justify-between px-1.5 py-1.5 text-xs text-gray-700 hover:bg-gray-50 rounded group/col">
-                                                <span className="truncate">{c}</span>
-                                                <button onClick={() => deleteCol(c)} className="opacity-0 group-hover/col:opacity-100 text-gray-400 hover:text-red-500"><XIcon size="w-3 h-3" /></button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        <button className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm">Filters</button>
-                        
-                        <div className="relative">
                             <button onClick={() => setShowSort(v => !v)} className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm flex items-center gap-1">
                                 Sort {sortRule.col && <span className="text-sky-600 font-bold ml-1">({sortRule.col})</span>}
                             </button>
@@ -1319,7 +1346,7 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                                         }} className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-between">
                                             {opt}
                                             {sortRule.col === opt && (
-                                                <span className="text-sky-500 font-bold">{sortRule.asc ? "↑" : "↓"}</span>
+                                                <span className="text-sky-500 font-bold">{sortRule.asc ? "ASC" : "DESC"}</span>
                                             )}
                                         </button>
                                     ))}
@@ -1333,17 +1360,16 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                         </div>
 
                         <button onClick={exportExcel} className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm">Export</button>
-                        <button className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm">Save</button>
                     </div>
                 </div>
 
                 <div style={{ overflowX: 'auto', width: '100%' }}>
-                    <table style={{ minWidth: 'max-content', width: '100%' }} className="text-sm border-collapse border border-gray-300">
+                    <table style={{ minWidth: 'max-content', width: '100%' }} className="text-sm border-collapse">
                         <thead>
-                            <tr className="bg-slate-50 border-b border-gray-300">
-                                <th className="w-8 px-2 py-1.5 border-r border-gray-300 bg-slate-50 sticky left-0 z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></th>
+                            <tr className="bg-slate-50 border-b border-gray-200">
+                                <th className="w-8 px-2 py-2.5 border-r border-gray-200 bg-slate-50 sticky left-0 z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></th>
                                 {columns.map(h => (
-                                    <th key={h} className="px-3 py-1.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap border-r border-gray-300">
+                                    <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap border-r border-gray-200">
                                         {h}
                                     </th>
                                 ))}
@@ -1352,10 +1378,10 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                         </thead>
                         <tbody>
                             {paginatedData.map((company: any) => (
-                                <tr key={company.id} className="border-b border-gray-200 hover:bg-sky-50/30 transition-colors group">
-                                    <td className="w-8 px-2 py-1.5 border-r border-gray-200 bg-white group-hover:bg-sky-50/30 sticky left-0 text-center align-middle transition-colors z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></td>
+                                <tr key={company.id} className="border-b border-gray-100 hover:bg-sky-50/20 transition-colors group">
+                                    <td className="w-8 px-2 py-3 border-r border-gray-200 bg-white group-hover:bg-sky-50/20 sticky left-0 text-center align-middle transition-colors z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></td>
                                     {columns.map((col, ci) => (
-                                        <td key={col} className="px-3 py-1.5 border-r border-gray-200 relative">
+                                        <td key={col} className="px-3 py-3 border-r border-gray-200 relative">
                                             {ci === 0 ? (
                                                 <div className="flex items-center gap-1.5">
                                                     <div className="w-5 h-5 text-[10px] rounded flex items-center justify-center flex-shrink-0 text-white font-bold" style={{ background: "#0ea5e9" }}>
@@ -1390,7 +1416,7 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                             disabled={safeCurrentPage === 1}
                             className={`px-2.5 py-1 text-xs font-medium ${safeCurrentPage === 1 ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:text-gray-900'}`}
                         >
-                            ‹ Prev
+                            {"< Prev"}
                         </button>
                         
                         {Array.from({ length: totalPages }, (_, i) => i + 1).map(pageNum => (
@@ -1409,7 +1435,7 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                             disabled={safeCurrentPage === totalPages}
                             className={`px-2.5 py-1 text-xs font-medium ${safeCurrentPage === totalPages ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:text-gray-900'}`}
                         >
-                            Next ›
+                            {"Next >"}
                         </button>
                     </div>
                     
@@ -1440,11 +1466,11 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
     );
 }
 
-/* ═══════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    AI AGENT VIEWS
-═══════════════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-/* ──── Shared agent UI helpers ──── */
+/* â”€â”€â”€â”€ Shared agent UI helpers â”€â”€â”€â”€ */
 function AgentStatusBadge({ status }: { status: "running" | "idle" | "alert" }) {
     const cfg = {
         running: { dot: "#22c55e", label: "Running", bg: "#f0fdf4", text: "#166534" },
@@ -1466,7 +1492,7 @@ function MetricCard({ label, value, delta, deltaUp, sub }: { label: string; valu
             <span className="text-2xl font-bold text-gray-900">{value}</span>
             {delta && (
                 <span className={`text-xs font-semibold ${deltaUp ? "text-green-600" : "text-red-500"}`}>
-                    {deltaUp ? "▲" : "▼"} {delta}
+                    {deltaUp ? "+" : "-"} {delta}
                 </span>
             )}
             {sub && <span className="text-xs text-gray-400">{sub}</span>}
@@ -1486,8 +1512,16 @@ function SectionHeader({ title, description, action }: { title: string; descript
     );
 }
 
-/* ───────── 1. Prospecting Agent View ───────── */
-function ProspectingAgentView({ agentResults = [], onProspectAll }: { agentResults?: AgentResult[], onProspectAll?: () => void }) {
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ 1. Prospecting Agent View â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+function ProspectingAgentView({
+    agentResults = [],
+    onProspectAll,
+    isProspecting = false,
+}: {
+    agentResults?: AgentResult[];
+    onProspectAll?: () => void;
+    isProspecting?: boolean;
+}) {
     const [selectedTarget, setSelectedTarget] = useState<number | null>(null);
     const [emailTab, setEmailTab] = useState<'email1' | 'email2'>('email1');
     const [editedEmail1, setEditedEmail1] = useState('');
@@ -1497,19 +1531,39 @@ function ProspectingAgentView({ agentResults = [], onProspectAll }: { agentResul
 
     const scoreColor = (s: number) => s >= 90 ? "#22c55e" : s >= 75 ? "#f59e0b" : "#94a3b8";
 
-    // Compute stats from actual data
     const targetsResearched = agentResults.length;
-    const sequencesActive = agentResults.filter(r => r.email1 || r.email2).length;
+    const sequencesReady = agentResults.filter(r => (r.sequence?.length || 0) > 0 || r.email1 || r.email2).length;
     const avgFitScore = agentResults.length > 0
         ? Math.round(agentResults.reduce((sum, r) => sum + (r.fitScore || 0), 0) / agentResults.length)
         : 0;
+    const highFitTargets = agentResults.filter(r => r.fitScore >= 80).length;
+    const researchSignals = agentResults.reduce((sum, r) => sum + (r.publicSignals?.length || 0), 0);
+    const adaptivePlays = agentResults.reduce((sum, r) => sum + (r.messagingAdjustments?.length || 0), 0);
 
-    // Build activity log from actual results
-    const activityLog = agentResults.map((r, i) => ({
-        time: `${i + 1}m ago`,
-        action: `Researched ${r.enrichedProfile?.key_contact?.name || 'target'} (${r.companyName}) · Score: ${r.fitScore}`,
-        color: "#6366f1",
-    }));
+    const activityLog = agentResults.flatMap((result, index) => {
+        const items = [
+            {
+                time: `${index + 1}m ago`,
+                action: `Researched ${result.companyName} across ${result.publicSignals?.length || 0} public signals`,
+                color: "#6366f1",
+            },
+            {
+                time: `${index + 2}m ago`,
+                action: `Built ${Math.max(result.sequence?.length || 0, result.email1 || result.email2 ? 2 : 0)} outreach steps for ${result.enrichedProfile?.key_contact?.name || "the buying team"}`,
+                color: "#0ea5e9",
+            },
+        ];
+
+        if (result.messagingAdjustments && result.messagingAdjustments.length > 0) {
+            items.push({
+                time: `${index + 3}m ago`,
+                action: `Prepared adaptive messaging for ${result.companyName} based on engagement scenarios`,
+                color: "#f59e0b",
+            });
+        }
+
+        return items;
+    }).slice(0, 12);
 
     const openTarget = (idx: number) => {
         const t = agentResults[idx];
@@ -1539,12 +1593,12 @@ function ProspectingAgentView({ agentResults = [], onProspectAll }: { agentResul
                             <svg viewBox="0 0 20 20" fill="white" className="w-5 h-5"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" /></svg>
                         </div>
                         <div>
-                            <h1 className="text-lg font-bold text-gray-900">Prospecting Agent</h1>
-                            <p className="text-xs text-gray-400">Researches targets · scores fit · writes personalized sequences · adapts on engagement</p>
+                            <h1 className="text-lg font-bold text-gray-900">Prospecting agents</h1>
+                            <p className="text-xs text-gray-400 max-w-3xl">Prospecting agents — that research targets across public data sources, score fit, write personalized outreach sequences, and adjust messaging based on engagement signals — without manual intervention.</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
-                        <AgentStatusBadge status={agentResults.length > 0 ? "running" : "idle"} />
+                        <AgentStatusBadge status={isProspecting ? "running" : "idle"} />
                         {onProspectAll && (
                             <button
                                 onClick={onProspectAll}
@@ -1559,13 +1613,14 @@ function ProspectingAgentView({ agentResults = [], onProspectAll }: { agentResul
                 </div>
             </div>
 
-            {/* Metrics — computed from real data */}
+            {/* Metrics â€” computed from real data */}
             <div className="flex gap-4 flex-wrap">
                 <MetricCard label="Targets Researched" value={String(targetsResearched)} sub={targetsResearched === 0 ? "No targets yet" : `${targetsResearched} processed`} />
-                <MetricCard label="Sequences Active" value={String(sequencesActive)} sub={sequencesActive === 0 ? "None active" : `${sequencesActive} ready`} />
-                <MetricCard label="Avg. Fit Score" value={avgFitScore > 0 ? String(avgFitScore) : "—"} sub="/ 100" />
-                <MetricCard label="Reply Rate" value="—" sub="No data yet" />
-                <MetricCard label="Meetings Booked" value="—" sub="No data yet" />
+                <MetricCard label="High-Fit Accounts" value={String(highFitTargets)} sub={highFitTargets === 0 ? "Awaiting strong fits" : "80+ fit score"} />
+                <MetricCard label="Sequences Ready" value={String(sequencesReady)} sub={sequencesReady === 0 ? "No sequences yet" : `${sequencesReady} ready to send`} />
+                <MetricCard label="Avg. Fit Score" value={avgFitScore > 0 ? String(avgFitScore) : "--"} sub="/ 100" />
+                <MetricCard label="Research Signals" value={String(researchSignals)} sub="Captured from public inputs" />
+                <MetricCard label="Adaptive Plays" value={String(adaptivePlays)} sub="Messaging adjustments ready" />
             </div>
 
             {/* Target Queue */}
@@ -1583,7 +1638,7 @@ function ProspectingAgentView({ agentResults = [], onProspectAll }: { agentResul
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
                         </div>
                         <h3 className="text-sm font-semibold text-gray-900 mb-1">Queue is empty</h3>
-                        <p className="text-xs text-gray-500 max-w-sm">No companies have been prospected yet. Go to the CRM → Companies tab and click "Create + Prospect" to generate targeted outreach!</p>
+                        <p className="text-xs text-gray-500 max-w-sm">No companies have been prospected yet. Go to the CRM {"->"} Companies tab and click "Create + Prospect" to generate targeted outreach!</p>
                     </div>
                 ) : (
                     <div className="px-6 pb-2">
@@ -1637,7 +1692,7 @@ function ProspectingAgentView({ agentResults = [], onProspectAll }: { agentResul
                                                     <td colSpan={5} className="bg-sky-50/30 p-0 border-b border-gray-100">
                                                         <div className="p-4 mx-6 my-2 bg-white rounded-xl shadow-sm border border-sky-100">
                                                             <div className="flex items-center justify-between mb-3 border-b border-gray-100 pb-2">
-                                                                <span className="text-xs font-bold text-gray-800 uppercase tracking-wide">AI Outreach Sequence — {contactName.split(" ")[0]}</span>
+                                                                <span className="text-xs font-bold text-gray-800 uppercase tracking-wide">AI Outreach Sequence - {contactName.split(" ")[0]}</span>
                                                                 <button onClick={(e) => { e.stopPropagation(); setSelectedTarget(null); }} className="text-gray-400 hover:text-gray-600"><XIcon size="w-4 h-4" /></button>
                                                             </div>
 
@@ -1673,12 +1728,114 @@ function ProspectingAgentView({ agentResults = [], onProspectAll }: { agentResul
                                                                     className={`px-4 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 ${forwarded ? 'bg-green-500 text-white' : 'bg-sky-500 text-white hover:bg-sky-600'}`}
                                                                 >
                                                                     <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg>
-                                                                    {forwarded ? 'Sent ✓' : 'Send Email'}
+                                                                    {forwarded ? 'Sent' : 'Send Email'}
                                                                 </button>
                                                                 <button onClick={(e) => { e.stopPropagation(); setSelectedTarget(null); }}
                                                                     className="px-4 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded hover:bg-slate-50 transition-colors">
                                                                     Discard
                                                                 </button>
+                                                            </div>
+
+                                                            <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
+                                                                <div className="space-y-3">
+                                                                    {t.researchSummary && (
+                                                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                                                            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Research Brief</div>
+                                                                            <p className="text-sm text-gray-700 leading-relaxed">{t.researchSummary}</p>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {t.publicSignals && t.publicSignals.length > 0 && (
+                                                                        <div className="rounded-xl border border-slate-200 bg-white p-4">
+                                                                            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Public Signals</div>
+                                                                            <div className="space-y-2">
+                                                                                {t.publicSignals.slice(0, 3).map((signal, signalIndex) => (
+                                                                                    <div key={`${signal.label}-${signalIndex}`} className="rounded-lg border border-sky-100 bg-sky-50/70 p-3">
+                                                                                        <div className="text-xs font-semibold text-sky-700">{signal.label}</div>
+                                                                                        <p className="mt-1 text-xs text-gray-700">{signal.detail}</p>
+                                                                                        {signal.impact && <p className="mt-1 text-[11px] text-slate-500">{signal.impact}</p>}
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {t.fitBreakdown && t.fitBreakdown.length > 0 && (
+                                                                        <div className="rounded-xl border border-slate-200 bg-white p-4">
+                                                                            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Fit Breakdown</div>
+                                                                            <div className="space-y-3">
+                                                                                {t.fitBreakdown.slice(0, 4).map((item, itemIndex) => (
+                                                                                    <div key={`${item.label}-${itemIndex}`}>
+                                                                                        <div className="flex items-center justify-between text-xs font-semibold text-gray-700 mb-1">
+                                                                                            <span>{item.label}</span>
+                                                                                            <span>{item.score}/100</span>
+                                                                                        </div>
+                                                                                        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden mb-1.5">
+                                                                                            <div className="h-full rounded-full bg-sky-500" style={{ width: `${item.score}%` }} />
+                                                                                        </div>
+                                                                                        <p className="text-[11px] text-slate-500">{item.summary}</p>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                <div className="space-y-3">
+                                                                    {t.sequence && t.sequence.length > 0 && (
+                                                                        <div className="rounded-xl border border-slate-200 bg-white p-4">
+                                                                            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Outreach Sequence</div>
+                                                                            <div className="space-y-2">
+                                                                                {t.sequence.slice(0, 4).map((step, stepIndex) => (
+                                                                                    <div key={`${step.step}-${stepIndex}`} className="rounded-lg border border-gray-100 bg-slate-50 p-3">
+                                                                                        <div className="flex items-center justify-between gap-2">
+                                                                                            <span className="text-xs font-semibold text-gray-800">{step.step} · {step.channel}</span>
+                                                                                            <span className="text-[11px] text-slate-500">{step.timing}</span>
+                                                                                        </div>
+                                                                                        <div className="mt-1 text-xs font-medium text-sky-700">{step.objective}</div>
+                                                                                        <p className="mt-1 text-xs text-gray-600 leading-relaxed">{step.message}</p>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {t.messagingAdjustments && t.messagingAdjustments.length > 0 && (
+                                                                        <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+                                                                            <div className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">Adaptive Messaging</div>
+                                                                            <div className="space-y-2">
+                                                                                {t.messagingAdjustments.slice(0, 3).map((item, itemIndex) => (
+                                                                                    <div key={`${item.signal}-${itemIndex}`} className="rounded-lg border border-amber-200 bg-white/70 p-3">
+                                                                                        <div className="text-xs font-semibold text-gray-800">{item.signal}</div>
+                                                                                        <p className="mt-1 text-xs text-gray-700">{item.adjustment}</p>
+                                                                                        <div className="mt-2 space-y-1">
+                                                                                            {item.talkingPoints.slice(0, 3).map((point, pointIndex) => (
+                                                                                                <div key={`${point}-${pointIndex}`} className="flex items-start gap-2 text-[11px] text-slate-600">
+                                                                                                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                                                                                                    <span>{point}</span>
+                                                                                                </div>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {t.nextActions && t.nextActions.length > 0 && (
+                                                                        <div className="rounded-xl border border-gray-200 bg-white p-4">
+                                                                            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Next Best Actions</div>
+                                                                            <div className="space-y-2">
+                                                                                {t.nextActions.slice(0, 4).map((action, actionIndex) => (
+                                                                                    <div key={`${action}-${actionIndex}`} className="flex items-start gap-2 text-sm text-gray-700">
+                                                                                        <span className="mt-1 h-1.5 w-1.5 rounded-full bg-sky-500 flex-shrink-0" />
+                                                                                        <span>{action}</span>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </td>
@@ -1693,7 +1850,7 @@ function ProspectingAgentView({ agentResults = [], onProspectAll }: { agentResul
                 )}
             </div>
 
-            {/* Agent Activity Log — dynamic */}
+            {/* Agent Activity Log â€” dynamic */}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
                 <SectionHeader title="Agent Activity Log" description="Real-time actions taken by the Prospecting Agent" />
                 {activityLog.length === 0 ? (
@@ -1719,18 +1876,205 @@ function ProspectingAgentView({ agentResults = [], onProspectAll }: { agentResul
     );
 }
 
-/* ───────── 2. Deal Intelligence Agent View ───────── */
-function DealIntelligenceView() {
-    const deals = [
-        { id: 1, name: "Meesho Enterprise Plan", value: "₹18L", stage: "Negotiation", health: 34, risk: "High", signals: ["No reply 8 days", "Champion left company"], owner: "Shlok", close: "Apr 15", recovery: "Schedule exec call, share ROI case study" },
-        { id: 2, name: "Nykaa B2B Expansion", value: "₹42L", stage: "Proposal Sent", health: 71, risk: "Medium", signals: ["Opened proposal 3x", "Competitor Salesforce mentioned"], owner: "Priya", close: "Apr 28", recovery: "Send competitive battlecard, offer POC" },
-        { id: 3, name: "OYO SaaS Suite", value: "₹65L", stage: "Demo Done", health: 88, risk: "Low", signals: ["Champion highly engaged", "Use-case mapping doc shared"], owner: "Shlok", close: "May 5", recovery: null },
-        { id: 4, name: "PhonePe Analytics", value: "₹29L", stage: "Discovery", health: 62, risk: "Medium", signals: ["Budget freeze rumor", "3 stakeholders added"], owner: "Arjun", close: "May 20", recovery: "Prepare multi-threading plan for new stakeholders" },
-        { id: 5, name: "Paytm Dashboard", value: "₹11L", stage: "Proposal Sent", health: 45, risk: "High", signals: ["No engagement 5 days", "Legal asked for security docs"], owner: "Kavya", close: "Apr 18", recovery: "Send security one-pager, loop in solutions engineer" },
-    ];
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ 2. Deal Intelligence Agent View â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResult[] }) {
+    const [refreshTick, setRefreshTick] = useState(0);
 
-    const healthColor = (h: number) => h >= 75 ? "#22c55e" : h >= 50 ? "#f59e0b" : "#ef4444";
-    const riskBg = (r: string) => r === "High" ? "bg-red-50 text-red-700" : r === "Medium" ? "bg-amber-50 text-amber-700" : "bg-green-50 text-green-700";
+    useEffect(() => {
+        const intervalId = window.setInterval(() => setRefreshTick(tick => tick + 1), 15000);
+        const focusHandler = () => setRefreshTick(tick => tick + 1);
+        window.addEventListener("focus", focusHandler);
+        return () => {
+            window.clearInterval(intervalId);
+            window.removeEventListener("focus", focusHandler);
+        };
+    }, []);
+
+    const healthColor = (health: number) => health >= 75 ? "#22c55e" : health >= 50 ? "#f59e0b" : "#ef4444";
+    const riskBg = (risk: string) => risk === "High" ? "bg-red-50 text-red-700" : risk === "Medium" ? "bg-amber-50 text-amber-700" : "bg-green-50 text-green-700";
+
+    const recoveryForDeal = (categories: Set<string>, deal: DealRecord, research?: AgentResult) => {
+        if (categories.size === 0) return null;
+        const companyLabel = hasMeaningfulValue(deal.account) ? deal.account : deal.name;
+        const proofPoint = research?.publicSignals?.[0]?.detail || research?.researchSummary || `${companyLabel}'s growth priorities`;
+
+        if (categories.has("competitive")) {
+            return {
+                headline: "Reframe differentiation before the comparison hardens",
+                action: "Share a short battlecard and ask which competitor claim needs to be answered.",
+                talkingPoints: [
+                    "Lead with why an AI-native CRM changes seller workflow, not just reporting.",
+                    `Reference ${proofPoint}.`,
+                    "Ask which evaluation criterion matters most before the next call.",
+                ],
+            };
+        }
+
+        if (categories.has("engagement")) {
+            return {
+                headline: "Reset momentum with a sharper business hypothesis",
+                action: "Run a re-engagement touch that names one problem and one low-friction next step.",
+                talkingPoints: [
+                    `Anchor on the cost of stalled follow-up or weak pipeline visibility at ${companyLabel}.`,
+                    `Tie the message back to ${deal.stage.toLowerCase()} momentum instead of product features.`,
+                    "Offer a 15-minute workflow teardown with two concrete outcomes.",
+                ],
+            };
+        }
+
+        if (categories.has("stakeholder")) {
+            return {
+                headline: "Broaden stakeholder coverage before the deal stalls",
+                action: "Add one operational stakeholder and one economic stakeholder to the next step.",
+                talkingPoints: [
+                    "Confirm who owns the workflow problem internally.",
+                    "Ask who will evaluate process impact and implementation effort.",
+                    "Position CustBuds as a shared workflow layer across sales leadership and RevOps.",
+                ],
+            };
+        }
+
+        if (categories.has("timeline")) {
+            return {
+                headline: "Close the gap between stage and close date",
+                action: "Re-baseline the mutual plan and agree on a realistic decision path.",
+                talkingPoints: [
+                    `Point out the compressed timeline between ${deal.stage.toLowerCase()} and the target close.`,
+                    "Ask which approvals or proof points are still missing.",
+                    "Offer a tighter pilot or success plan instead of a broad rollout conversation.",
+                ],
+            };
+        }
+
+        return {
+            headline: "Tighten coverage before the deal weakens further",
+            action: "Fill the missing CRM context and reconnect the opportunity to a clear business pain.",
+            talkingPoints: [
+                `Use ${proofPoint} as the opening context.`,
+                "Confirm owner, contact, and next-step accountability.",
+                "Move the conversation from generic interest to a concrete workflow bottleneck.",
+            ],
+        };
+    };
+
+    const intelligence = useMemo(() => {
+        const activeDeals = (readStoredRows(DEALS_STORAGE_KEY) as DealRecord[]).filter(deal => deal.status === "active");
+        const meetings = readStoredRows("custbuds_meetings");
+        const calls = readStoredRows("custbuds_calls");
+        const storedResults = readStoredRows("custbuds_agent_results") as unknown as AgentResult[];
+        const researchMap = new Map<string, AgentResult>();
+        [...agentResults, ...storedResults].forEach(result => {
+            const key = normaliseLookupKey(result.companyName);
+            if (key && !researchMap.has(key)) researchMap.set(key, result);
+        });
+
+        const liveDeals = activeDeals.map(deal => {
+            const companyLabel = hasMeaningfulValue(deal.account) ? deal.account : deal.name;
+            const companyKey = normaliseLookupKey(companyLabel);
+            const contactKey = normaliseLookupKey(deal.contact);
+            const relatedMeetings = meetings.filter(row => {
+                const rowCompany = normaliseLookupKey(row["Company"]);
+                const rowContact = normaliseLookupKey(row["Contact"]);
+                return (companyKey && rowCompany === companyKey) || (contactKey && rowContact === contactKey);
+            });
+            const relatedCalls = calls.filter(row => {
+                const rowCompany = normaliseLookupKey(row["Company"]);
+                const rowContact = normaliseLookupKey(row["Contact"]);
+                return (companyKey && rowCompany === companyKey) || (contactKey && rowContact === contactKey);
+            });
+            const relatedActivities = [...relatedMeetings, ...relatedCalls];
+            const parsedDates = relatedActivities
+                .map(row => extractParsedActivityDate(row))
+                .filter((value): value is Date => Boolean(value))
+                .sort((a, b) => b.getTime() - a.getTime());
+            const lastActivity = parsedDates[0] || null;
+            const daysSinceActivity = lastActivity ? Math.max(0, -daysBetween(lastActivity)) : null;
+            const closeDate = parseLooseDate(deal.expectedClose);
+            const daysToClose = closeDate ? daysBetween(closeDate) : null;
+            const research = researchMap.get(companyKey);
+            const stageKey = deal.stage.toLowerCase();
+            const lateStage = ["proposal", "proposal sent", "negotiation", "demo done"].includes(stageKey);
+            const activityText = relatedActivities
+                .map(row => [row["Meeting"], row["Call"], row["Status"], row["Next Step"], row["Company"], row["Contact"]].filter(Boolean).join(" "))
+                .join(" ");
+
+            let health = 76;
+            const signals: string[] = [];
+            const categories = new Set<string>();
+            let severeSignals = 0;
+
+            const addSignal = (category: string, text: string, impact: number, severe = false) => {
+                categories.add(category);
+                signals.push(text);
+                health -= impact;
+                if (severe) severeSignals += 1;
+            };
+
+            if (!hasMeaningfulValue(deal.owner)) addSignal("ownership", "Deal owner is still unassigned", 16, true);
+            if (!hasMeaningfulValue(deal.contact)) addSignal("stakeholder", "No active stakeholder mapped on the deal", 16, true);
+            if (!hasMeaningfulValue(deal.account)) addSignal("coverage", "Deal is not linked to a company record", 10);
+            if (!research) addSignal("research", "No prospect research brief captured for this company yet", 8);
+
+            if (relatedActivities.length === 0) {
+                addSignal("engagement", lateStage ? "Late-stage deal has no meetings or calls logged" : "No engagement activity logged yet", lateStage ? 20 : 12, lateStage);
+            } else if (daysSinceActivity !== null && daysSinceActivity > 7) {
+                addSignal("engagement", `Engagement dropped: no dated activity in ${daysSinceActivity} days`, 18, true);
+            }
+
+            if (/cancel|no show|no-show|missed|no answer|voicemail|resched|stalled/i.test(activityText)) addSignal("engagement", "Recent activity status suggests friction or a stalled follow-up", 14);
+            if (/salesforce|hubspot|zoho|freshsales|pipedrive|competitor/i.test(activityText)) addSignal("competitive", "Competitor language detected in meeting or call notes", 16, true);
+            if (lateStage && relatedActivities.length < 2) addSignal("stakeholder", "Late-stage deal is under-threaded across stakeholders", 10);
+            if (daysToClose !== null && daysToClose <= 10 && !lateStage) addSignal("timeline", "Close date is aggressive for the current stage", 12);
+
+            if (daysSinceActivity !== null && daysSinceActivity <= 3) health += 8;
+            if (relatedActivities.length >= 2) health += 5;
+            if ((research?.fitScore || 0) >= 80) health += 4;
+
+            health = Math.max(0, Math.min(100, Math.round(health)));
+            const risk: "High" | "Medium" | "Low" = health < 50 || severeSignals >= 2 ? "High" : health < 75 || signals.length >= 2 ? "Medium" : "Low";
+            const heatmapBars = [0, 0, 0, 0, 0, 0, 0];
+            relatedActivities.forEach(row => {
+                const parsedDate = extractParsedActivityDate(row);
+                if (!parsedDate) return;
+                const daysAgo = Math.max(0, -daysBetween(parsedDate));
+                if (daysAgo <= 6) heatmapBars[6 - daysAgo] += 1;
+            });
+
+            return {
+                id: deal.id,
+                name: deal.name,
+                value: deal.value,
+                stage: deal.stage,
+                health,
+                risk,
+                signals: signals.length > 0 ? signals.slice(0, 4) : ["No material risk signals detected from current CRM data"],
+                owner: deal.owner,
+                close: deal.expectedClose,
+                company: companyLabel,
+                contact: deal.contact,
+                activityCount: relatedActivities.length,
+                lastActivityLabel: formatRelativeDayLabel(lastActivity),
+                heatmapBars,
+                recovery: recoveryForDeal(categories, deal, research),
+            } as DealIntelRecord;
+        }).sort((a, b) => a.health - b.health);
+
+        return {
+            deals: liveDeals,
+            atRiskDeals: liveDeals.filter(deal => deal.risk !== "Low").length,
+            avgHealth: liveDeals.length > 0 ? Math.round(liveDeals.reduce((sum, deal) => sum + deal.health, 0) / liveDeals.length) : 0,
+            pipelineValue: liveDeals.reduce((sum, deal) => sum + parseDealValue(deal.value), 0),
+            recoveryCount: liveDeals.filter(deal => deal.recovery).length,
+            signalCount: liveDeals.reduce((sum, deal) => sum + deal.signals.length, 0),
+            heatmapRows: liveDeals.slice(0, 5).map(deal => ({ name: deal.name, bars: deal.heatmapBars })),
+            alerts: liveDeals.flatMap(deal => deal.signals.slice(0, 2).map(signal => ({
+                icon: deal.risk === "High" ? "!" : deal.risk === "Medium" ? "i" : "+",
+                msg: `${deal.name}: ${signal}`,
+                time: deal.lastActivityLabel,
+                tone: deal.risk === "High" ? "danger" : deal.risk === "Medium" ? "info" : "positive",
+            } as DealIntelAlert))).slice(0, 5),
+        };
+    }, [agentResults, refreshTick]);
 
     return (
         <div className="space-y-6">
@@ -1741,28 +2085,36 @@ function DealIntelligenceView() {
                             <svg viewBox="0 0 20 20" fill="white" className="w-5 h-5"><path fillRule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11 4a1 1 0 10-2 0v4a1 1 0 102 0V7zm-3 1a1 1 0 10-2 0v3a1 1 0 102 0V8zM8 9a1 1 0 00-2 0v2a1 1 0 102 0V9z" clipRule="evenodd" /></svg>
                         </div>
                         <div>
-                            <h1 className="text-lg font-bold text-gray-900">Deal Intelligence Agent</h1>
-                            <p className="text-xs text-gray-400">Watches pipeline health · detects risk signals · generates recovery plays</p>
+                            <h1 className="text-lg font-bold text-gray-900">Deal intelligence agents</h1>
+                            <p className="text-xs text-gray-400 max-w-3xl">Deal intelligence agents — that monitor pipeline health in real time, pick up risk signals (engagement drops, competitor mentions, stakeholder changes), and generate recovery plays with specific talking points.</p>
                         </div>
                     </div>
-                    <AgentStatusBadge status="alert" />
+                    <AgentStatusBadge status={intelligence.atRiskDeals > 0 ? "alert" : "idle"} />
                 </div>
             </div>
 
             <div className="flex gap-4 flex-wrap">
-                <MetricCard label="Active Deals" value="23" sub="₹3.2Cr total" />
-                <MetricCard label="At-Risk Deals" value="7" delta="2 new alerts" deltaUp={false} />
-                <MetricCard label="Avg. Health Score" value="64" delta="4 pts this week" deltaUp={false} />
-                <MetricCard label="Recovery Plays Sent" value="12" delta="3 today" deltaUp />
-                <MetricCard label="Cycle Time (avg)" value="38d" delta="5d vs target" deltaUp={false} />
+                <MetricCard label="Active Deals" value={String(intelligence.deals.length)} sub={formatDealValue(intelligence.pipelineValue)} />
+                <MetricCard label="At-Risk Deals" value={String(intelligence.atRiskDeals)} sub={intelligence.atRiskDeals === 0 ? "No active alerts" : "Needs recovery attention"} />
+                <MetricCard label="Avg. Health Score" value={intelligence.deals.length > 0 ? String(intelligence.avgHealth) : "--"} sub="/ 100" />
+                <MetricCard label="Recovery Plays Ready" value={String(intelligence.recoveryCount)} sub="Generated from CRM signals" />
+                <MetricCard label="Signals Detected" value={String(intelligence.signalCount)} sub="Across deals, calls, and meetings" />
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="px-6 py-5">
-                    <SectionHeader title="Pipeline Risk Monitor" description="Agent-scored deals with AI-generated recovery plays" />
+                    <SectionHeader title="Pipeline Risk Monitor" description="Live scoring generated from saved deal, meeting, call, and research data" />
                 </div>
+                {intelligence.deals.length === 0 ? (
+                    <div className="px-6 pb-8">
+                        <div className="rounded-xl border border-dashed border-gray-200 bg-slate-50 px-6 py-12 text-center">
+                            <div className="text-sm font-semibold text-gray-900">No active deals to analyze yet</div>
+                            <p className="mt-2 text-xs text-gray-500">Add deals, meetings, or calls in the CRM tabs and this agent will start surfacing live risk signals and recovery plays.</p>
+                        </div>
+                    </div>
+                ) : (
                 <div className="space-y-0">
-                    {deals.map(d => (
+                    {intelligence.deals.map(d => (
                         <div key={d.id} className="px-6 py-4 border-t border-gray-100 hover:bg-amber-50/20 transition-colors">
                             <div className="flex items-center gap-4">
                                 <div className="flex-1 min-w-0">
@@ -1770,8 +2122,8 @@ function DealIntelligenceView() {
                                         <span className="font-semibold text-sm text-gray-900">{d.name}</span>
                                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${riskBg(d.risk)}`}>{d.risk} Risk</span>
                                     </div>
-                                    <div className="flex items-center gap-4 text-xs text-gray-500">
-                                        <span>{d.stage}</span><span>·</span><span className="font-semibold text-gray-700">{d.value}</span><span>·</span><span>Close {d.close}</span><span>·</span><span>Owner: {d.owner}</span>
+                                    <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
+                                        <span>{d.stage}</span><span>-</span><span className="font-semibold text-gray-700">{d.value}</span><span>-</span><span>Close {d.close}</span><span>-</span><span>Owner: {d.owner}</span><span>-</span><span>{d.activityCount} activities</span><span>-</span><span>{d.lastActivityLabel}</span>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-3 flex-shrink-0">
@@ -1788,353 +2140,71 @@ function DealIntelligenceView() {
                             </div>
                             <div className="mt-2 flex flex-wrap gap-2">
                                 {d.signals.map(s => (
-                                    <span key={s} className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">⚡ {s}</span>
+                                    <span key={s} className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">{s}</span>
                                 ))}
                             </div>
                             {d.recovery && (
-                                <div className="mt-2 flex items-center gap-2">
-                                    <span className="text-xs font-semibold text-amber-700">🎯 Recovery Play:</span>
-                                    <span className="text-xs text-gray-600">{d.recovery}</span>
-                                    <button className="ml-auto px-2.5 py-1 text-xs font-semibold text-white rounded-md hover:opacity-90 flex-shrink-0" style={{ background: "#f59e0b" }}>Execute</button>
-                                </div>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-                    <SectionHeader title="Engagement Heatmap" description="Prospect activity this week" />
-                    <div className="space-y-2">
-                        {[
-                            { name: "OYO SaaS Suite", bars: [3,5,4,7,6,8,7] },
-                            { name: "PhonePe Analytics", bars: [2,1,4,2,5,3,4] },
-                            { name: "Nykaa B2B", bars: [1,0,2,5,3,2,4] },
-                            { name: "Meesho Enterprise", bars: [0,0,0,0,1,0,0] },
-                            { name: "Paytm Dashboard", bars: [2,1,0,0,0,1,0] },
-                        ].map(row => (
-                            <div key={row.name} className="flex items-center gap-3">
-                                <span className="text-xs text-gray-600 w-36 truncate">{row.name}</span>
-                                <div className="flex gap-1 flex-1">
-                                    {row.bars.map((v, i) => (
-                                        <div key={i} className="flex-1 rounded-sm" style={{ height: "20px", background: v === 0 ? "#f1f5f9" : `rgba(99,102,241,${0.15 + v * 0.11})` }} />
-                                    ))}
-                                </div>
-                            </div>
-                        ))}
-                        <div className="flex justify-end gap-1 mt-1">
-                            {["M","T","W","T","F","S","S"].map((d,i) => <span key={i} className="flex-1 text-center text-xs text-gray-300">{d}</span>)}
-                        </div>
-                    </div>
-                </div>
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-                    <SectionHeader title="Agent Alerts" description="Latest deal risk signals detected" />
-                    <div className="space-y-3">
-                        {[
-                            { icon: "🔴", msg: "Meesho champion left company — deal re-routed to new contact", time: "1h ago" },
-                            { icon: "🟡", msg: "Nykaa mentioned Salesforce on intro call recording", time: "3h ago" },
-                            { icon: "🟡", msg: "Paytm deal went 5 days without any prospect engagement", time: "5h ago" },
-                            { icon: "🟢", msg: "OYO champion shared proposal internally — strong buy signal", time: "8h ago" },
-                            { icon: "🔴", msg: "Meesho — no reply to 3 follow-ups in sequence", time: "1d ago" },
-                        ].map((a, i) => (
-                            <div key={i} className="flex items-start gap-2">
-                                <span className="text-sm">{a.icon}</span>
-                                <span className="text-xs text-gray-700 flex-1">{a.msg}</span>
-                                <span className="text-xs text-gray-400 flex-shrink-0">{a.time}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-/* ───────── 3. Revenue Retention Agent View ───────── */
-function RevenueRetentionView() {
-    const accounts = [
-        { id: 1, name: "IndiaMart", arr: "₹28L", churnRisk: 87, trend: "↓", signals: ["Usage dropped 62%", "Support tickets ×4", "Champion disengaged"], action: "Executive escalation", status: "Intervention Active" },
-        { id: 2, name: "PolicyBazaar", arr: "₹19L", churnRisk: 71, trend: "↓", signals: ["Logged in 2x this month", "Negative NPS survey"], action: "Personalized offer generated", status: "Offer Sent" },
-        { id: 3, name: "Delhivery", arr: "₹44L", churnRisk: 38, trend: "→", signals: ["Stable DAUs", "Feature adoption +8%"], action: null, status: "Healthy" },
-        { id: 4, name: "CarDekho", arr: "₹15L", churnRisk: 59, trend: "↓", signals:["Contract renewal in 30d", "Budget discussions started"], action: "Renewal outreach triggered", status: "Monitoring" },
-        { id: 5, name: "Lenskart", arr: "₹31L", churnRisk: 22, trend: "↑", signals: ["New power user added", "Upsell signal detected"], action: "Upsell sequence started", status: "Expanding" },
-    ];
-
-    const riskColor = (r: number) => r >= 70 ? "#ef4444" : r >= 45 ? "#f59e0b" : "#22c55e";
-
-    return (
-        <div className="space-y-6">
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#06b6d4,#6366f1)" }}>
-                            <svg viewBox="0 0 20 20" fill="white" className="w-5 h-5"><path fillRule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clipRule="evenodd" /></svg>
-                        </div>
-                        <div>
-                            <h1 className="text-lg font-bold text-gray-900">Revenue Retention Agent</h1>
-                            <p className="text-xs text-gray-400">Predicts churn · triggers interventions · generates offers · escalates to account teams</p>
-                        </div>
-                    </div>
-                    <AgentStatusBadge status="running" />
-                </div>
-            </div>
-
-            <div className="flex gap-4 flex-wrap">
-                <MetricCard label="Accounts Monitored" value="84" sub="across all tiers" />
-                <MetricCard label="High Churn Risk" value="9" delta="2 new today" deltaUp={false} />
-                <MetricCard label="Interventions Active" value="14" delta="3 escalated" deltaUp />
-                <MetricCard label="Retention Rate" value="91%" delta="2% improvement" deltaUp />
-                <MetricCard label="NRR (est.)" value="118%" delta="vs 106% target" deltaUp />
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="px-6 py-5">
-                    <SectionHeader title="Account Health Board" description="Churn predictions from usage, sentiment and engagement signals" />
-                </div>
-                <div>
-                    {accounts.map(a => (
-                        <div key={a.id} className="px-6 py-4 border-t border-gray-100 hover:bg-cyan-50/20 transition-colors">
-                            <div className="flex items-start gap-4">
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="font-bold text-sm text-gray-900">{a.name}</span>
-                                        <span className="text-xs font-medium text-gray-500">{a.arr} ARR</span>
-                                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                                            a.status === "Healthy" ? "bg-green-50 text-green-700" :
-                                            a.status === "Expanding" ? "bg-blue-50 text-blue-700" :
-                                            a.status === "Intervention Active" ? "bg-red-50 text-red-700" :
-                                            "bg-amber-50 text-amber-700"
-                                        }`}>{a.status}</span>
+                                <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+                                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                                        <div>
+                                            <div className="text-xs font-semibold text-amber-700 uppercase tracking-wider">Recovery Play</div>
+                                            <div className="mt-1 text-sm font-semibold text-gray-900">{d.recovery.headline}</div>
+                                        </div>
+                                        <span className="text-xs font-medium text-amber-700">{d.recovery.action}</span>
                                     </div>
-                                    <div className="flex flex-wrap gap-1.5 mt-1">
-                                        {a.signals.map(s => (
-                                            <span key={s} className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">{s}</span>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {d.recovery.talkingPoints.map(point => (
+                                            <span key={point} className="px-2.5 py-1 rounded-full bg-white text-xs text-gray-700 border border-amber-200">
+                                                {point}
+                                            </span>
                                         ))}
                                     </div>
-                                    {a.action && (
-                                        <div className="mt-2 flex items-center gap-2">
-                                            <span className="text-xs font-semibold text-cyan-700">⚡ Agent Action:</span>
-                                            <span className="text-xs text-gray-600">{a.action}</span>
-                                            <button className="ml-auto px-2.5 py-1 text-xs font-semibold text-white rounded-md hover:opacity-90 flex-shrink-0" style={{ background: "#06b6d4" }}>Review</button>
-                                        </div>
-                                    )}
                                 </div>
-                                <div className="text-right flex-shrink-0">
-                                    <div className="text-xs text-gray-400 mb-1">Churn Risk</div>
-                                    <div className="flex items-center gap-1 justify-end">
-                                        <span className="text-lg font-black" style={{ color: riskColor(a.churnRisk) }}>{a.churnRisk}%</span>
-                                        <span className="text-sm">{a.trend}</span>
-                                    </div>
-                                    <div className="mt-1 h-1.5 w-20 bg-gray-100 rounded-full overflow-hidden">
-                                        <div className="h-full rounded-full" style={{ width: `${a.churnRisk}%`, background: riskColor(a.churnRisk) }} />
-                                    </div>
-                                </div>
-                            </div>
+                            )}
                         </div>
                     ))}
                 </div>
+                )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-                    <SectionHeader title="Intervention Workflows" description="Agent-triggered actions in progress" />
-                    <div className="space-y-3">
-                        {[
-                            { account: "IndiaMart", workflow: "Executive Escalation", step: "Step 2/3", status: "In Progress" },
-                            { account: "PolicyBazaar", workflow: "Discount Offer", step: "Sent", status: "Awaiting" },
-                            { account: "CarDekho", workflow: "Renewal Campaign", step: "Step 1/4", status: "In Progress" },
-                            { account: "Lenskart", workflow: "Upsell Sequence", step: "Step 1/5", status: "Active" },
-                        ].map((w, i) => (
-                            <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                                <div>
-                                    <div className="text-xs font-semibold text-gray-800">{w.account}</div>
-                                    <div className="text-xs text-gray-400">{w.workflow} · {w.step}</div>
+                    <SectionHeader title="Engagement Heatmap" description="Daily meeting and call activity captured against active deals" />
+                    {intelligence.heatmapRows.length === 0 ? (
+                        <p className="text-xs text-gray-400">Add dated meetings or calls to populate the last 7 days of activity.</p>
+                    ) : (
+                        <div className="space-y-2">
+                            {intelligence.heatmapRows.map(row => (
+                                <div key={row.name} className="flex items-center gap-3">
+                                    <span className="text-xs text-gray-600 w-36 truncate">{row.name}</span>
+                                    <div className="flex gap-1 flex-1">
+                                        {row.bars.map((v, i) => (
+                                            <div key={i} className="flex-1 rounded-sm" style={{ height: "20px", background: v === 0 ? "#f1f5f9" : `rgba(99,102,241,${0.15 + v * 0.18})` }} />
+                                        ))}
+                                    </div>
                                 </div>
-                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                    w.status === "In Progress" ? "bg-blue-50 text-blue-700" :
-                                    w.status === "Awaiting" ? "bg-amber-50 text-amber-700" :
-                                    "bg-green-50 text-green-700"
-                                }`}>{w.status}</span>
+                            ))}
+                            <div className="flex justify-end gap-1 mt-1">
+                                {["-6d","-5d","-4d","-3d","-2d","-1d","Today"].map(day => <span key={day} className="flex-1 text-center text-xs text-gray-300">{day}</span>)}
                             </div>
-                        ))}
-                    </div>
+                        </div>
+                    )}
                 </div>
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-                    <SectionHeader title="Sentiment Signals" description="From usage data & support interactions" />
-                    <div className="space-y-3">
-                        {[
-                            { account: "IndiaMart", sentiment: "Negative", note: "3 unresolved tickets, team frustrated with onboarding" },
-                            { account: "PolicyBazaar", sentiment: "Neutral", note: "NPS score dropped from 7 to 4 in last survey" },
-                            { account: "Lenskart", sentiment: "Positive", note: "Power user added, API usage up 40% MoM" },
-                            { account: "Delhivery", sentiment: "Positive", note: "Feature adoption growing steadily across 3 teams" },
-                        ].map((s, i) => (
-                            <div key={i} className="flex items-start gap-2 border-b border-gray-50 pb-2 last:border-0">
-                                <span className={`mt-0.5 px-1.5 py-0.5 rounded text-xs font-bold flex-shrink-0 ${
-                                    s.sentiment === "Negative" ? "bg-red-100 text-red-700" :
-                                    s.sentiment === "Positive" ? "bg-green-100 text-green-700" :
-                                    "bg-gray-100 text-gray-600"
-                                }`}>{s.sentiment}</span>
-                                <div>
-                                    <div className="text-xs font-semibold text-gray-700">{s.account}</div>
-                                    <div className="text-xs text-gray-400">{s.note}</div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-/* ───────── 4. Competitive Intelligence Agent View ───────── */
-function CompetitiveIntelligenceView() {
-    const [activeCompetitor, setActiveCompetitor] = useState("Salesforce");
-
-    const competitors = ["Salesforce", "HubSpot", "Zoho", "Freshsales"];
-    const compData: Record<string, any> = {
-        Salesforce: {
-            mentions: 14, trend: "↑", recentMoves: [
-                "Launched Einstein Copilot with GPT-4o on Apr 2",
-                "Cut SMB pricing by 20% — effective April pricing",
-                "Signed 3 enterprise logos in India (Q1)",
-            ],
-            battlecard: { win: "CustBuds is 60% faster to deploy · No per-user pricing · Native WhatsApp integration", lose: "Their brand recognition in ENT · deeper ERP integrations", talk: "Show deployment speed benchmarks · emphasize India-first features" },
-        },
-        HubSpot: {
-            mentions: 9, trend: "→", recentMoves: [
-                "Launched 'HubSpot for Startups' India cohort",
-                "Integrated with Razorpay natively",
-                "Price hike for Marketing Hub — 15% starting May",
-            ],
-            battlecard: { win: "CustBuds AI agents are proactive · Better pipeline intelligence · Flat pricing", lose: "HS marketing automation depth · Partner ecosystem", talk: "Demo AI prospecting vs HS static sequences · cost calculator" },
-        },
-        Zoho: {
-            mentions: 6, trend: "↓", recentMoves: [
-                "Zoho One bundle promoted aggressively in SMB segment",
-                "Launched Zia AI 3.0 update",
-                "Channel partner program expanded",
-            ],
-            battlecard: { win: "CustBuds AI quality is superior · Modern UX · Better support", lose: "Zoho's price point and bundle value", talk: "ROI vs cost · show agent intelligence demo · time-to-value" },
-        },
-        Freshsales: {
-            mentions: 4, trend: "↓", recentMoves: [
-                "Acquired a data enrichment tool",
-                "New GTM hire from Salesforce India",
-                "Bundling with Freshdesk for mid-market push",
-            ],
-            battlecard: { win: "Deeper AI agents · Better prospecting · Stronger pipeline health", lose: "Freshworks ecosystem lock-in", talk: "Focus on AI differentiation · buyer journey intelligence" },
-        },
-    };
-
-    const cd = compData[activeCompetitor];
-
-    return (
-        <div className="space-y-6">
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#10b981,#06b6d4)" }}>
-                            <svg viewBox="0 0 20 20" fill="white" className="w-5 h-5"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z" /><path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" /></svg>
-                        </div>
-                        <div>
-                            <h1 className="text-lg font-bold text-gray-900">Competitive Intelligence Agent</h1>
-                            <p className="text-xs text-gray-400">Tracks market signals · pushes battlecards · updates positioning in active deals</p>
-                        </div>
-                    </div>
-                    <AgentStatusBadge status="running" />
-                </div>
-            </div>
-
-            <div className="flex gap-4 flex-wrap">
-                <MetricCard label="Signals Tracked" value="93" delta="12 this week" deltaUp />
-                <MetricCard label="Competitor Mentions" value="33" sub="in active deals" />
-                <MetricCard label="Battlecards Pushed" value="18" delta="5 today" deltaUp />
-                <MetricCard label="Win Rate vs Top Comp." value="61%" delta="4% improvement" deltaUp />
-                <MetricCard label="Deals Influenced" value="8" sub="by battlecards" />
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-5 py-5">
-                    <SectionHeader title="Competitors" description="Select to view intelligence" />
-                    <div className="space-y-2">
-                        {competitors.map(c => (
-                            <button key={c} onClick={() => setActiveCompetitor(c)}
-                                className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium border transition-all ${activeCompetitor === c ? "border-emerald-400 bg-emerald-50 text-emerald-800" : "border-gray-100 text-gray-700 hover:bg-gray-50"}`}>
-                                <div className="flex items-center justify-between">
-                                    <span>{c}</span>
-                                    <span className="text-xs text-gray-400">{compData[c].mentions} mentions {compData[c].trend}</span>
-                                </div>
-                            </button>
-                        ))}
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-gray-100">
-                        <div className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Latest Market Signals</div>
-                        <div className="space-y-2">
-                            {[
-                                { sig: "Salesforce Indian pricing change", time: "2h ago" },
-                                { sig: "HubSpot startup cohort launched", time: "1d ago" },
-                                { sig: "Zoho Zia 3.0 feature release", time: "2d ago" },
-                            ].map((s, i) => <div key={i} className="flex justify-between text-xs"><span className="text-gray-600">📡 {s.sig}</span><span className="text-gray-400 ml-2 flex-shrink-0">{s.time}</span></div>)}
-                        </div>
-                    </div>
-                </div>
-
-                <div className="col-span-2 space-y-4">
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-                        <div className="text-sm font-bold text-gray-900 mb-3">Recent Moves — {activeCompetitor}</div>
-                        <div className="space-y-2">
-                            {cd.recentMoves.map((m: string, i: number) => (
-                                <div key={i} className="flex items-start gap-2 text-xs text-gray-700">
-                                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold flex-shrink-0 text-xs">{i + 1}</span>
-                                    {m}
+                    <SectionHeader title="Agent Alerts" description="Latest risk signals generated from CRM activity and deal coverage" />
+                    {intelligence.alerts.length === 0 ? (
+                        <p className="text-xs text-gray-400">No alerts yet. As deals and activity are added, this panel will surface the highest-priority warnings.</p>
+                    ) : (
+                        <div className="space-y-3">
+                            {intelligence.alerts.map((a, i) => (
+                                <div key={i} className="flex items-start gap-2">
+                                    <span className={`text-sm ${a.tone === "danger" ? "text-red-500" : a.tone === "positive" ? "text-green-500" : "text-amber-500"}`}>{a.icon}</span>
+                                    <span className="text-xs text-gray-700 flex-1">{a.msg}</span>
+                                    <span className="text-xs text-gray-400 flex-shrink-0">{a.time}</span>
                                 </div>
                             ))}
                         </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="text-sm font-bold text-gray-900">Battlecard — vs {activeCompetitor}</div>
-                            <button className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg" style={{ background: "#10b981" }}>Push to Active Deals</button>
-                        </div>
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="bg-green-50 rounded-xl p-4 border border-green-100">
-                                <div className="text-xs font-bold text-green-800 mb-2">✅ Where We Win</div>
-                                <p className="text-xs text-green-700">{cd.battlecard.win}</p>
-                            </div>
-                            <div className="bg-red-50 rounded-xl p-4 border border-red-100">
-                                <div className="text-xs font-bold text-red-800 mb-2">⚠️ Watch Out For</div>
-                                <p className="text-xs text-red-700">{cd.battlecard.lose}</p>
-                            </div>
-                            <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                                <div className="text-xs font-bold text-blue-800 mb-2">💬 Talking Points</div>
-                                <p className="text-xs text-blue-700">{cd.battlecard.talk}</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-                        <div className="text-sm font-bold text-gray-900 mb-3">Active Deals with {activeCompetitor} Mentions</div>
-                        <div className="space-y-2">
-                            {[
-                                { deal: "Nykaa B2B Expansion", stage: "Proposal Sent", mention: "Prospect mentioned on intro call" },
-                                { deal: "OYO SaaS Suite", stage: "Demo Done", mention: "Referenced in email thread" },
-                            ].map((d, i) => (
-                                <div key={i} className="flex items-center gap-2 py-2 border-b border-gray-50 last:border-0">
-                                    <div className="flex-1">
-                                        <div className="text-xs font-semibold text-gray-800">{d.deal}</div>
-                                        <div className="text-xs text-gray-400">{d.stage} · {d.mention}</div>
-                                    </div>
-                                    <button className="px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100">Send Battlecard</button>
-                                </div>
-                            ))}
-                            {["Salesforce", "HubSpot"].includes(activeCompetitor) ? null : (
-                                <p className="text-xs text-gray-400 text-center py-3">No active deal mentions for {activeCompetitor} this week.</p>
-                            )}
-                        </div>
-                    </div>
+                    )}
                 </div>
             </div>
         </div>
@@ -2142,73 +2212,19 @@ function CompetitiveIntelligenceView() {
 }
 
 const DEALS_STORAGE_KEY = "custbuds_deals";
-const DEFAULT_DEALS: DealRecord[] = [
-    {
-        id: 1,
-        name: "Web Design Retainer",
-        stage: "New",
-        owner: "Shlok Parekh",
-        value: "--",
-        contact: "Sammie Smith",
-        account: "King Media",
-        priority: "None",
-        duration: "0 days",
-        expectedClose: "TBD",
-        status: "active",
-    },
-    {
-        id: 2,
-        name: "Deal 1",
-        stage: "Discovery",
-        owner: "Priya Shah",
-        value: "$70,000",
-        contact: "Madison Doyle",
-        account: "Bindeer Inc.",
-        priority: "High",
-        duration: "27 days",
-        expectedClose: "Jun 24",
-        status: "active",
-    },
-    {
-        id: 3,
-        name: "Deal 2",
-        stage: "Proposal",
-        owner: "Arjun Mehta",
-        value: "$122,000",
-        contact: "Leilani Krause",
-        account: "Pear Inc.",
-        priority: "High",
-        duration: "14 days",
-        expectedClose: "Jun 26",
-        status: "active",
-    },
-    {
-        id: 4,
-        name: "Deal 3",
-        stage: "Negotiation",
-        owner: "Kavya Nair",
-        value: "$78,000",
-        contact: "Phoenix Levy",
-        account: "HSBF",
-        priority: "Medium",
-        duration: "6 days",
-        expectedClose: "Jun 19",
-        status: "active",
-    },
-    {
-        id: 5,
-        name: "Deal name 5",
-        stage: "Won",
-        owner: "Rohan Singh",
-        value: "$89,000",
-        contact: "Leilani Krause",
-        account: "Pear Inc.",
-        priority: "None",
-        duration: "31 total days",
-        expectedClose: "Jan 15, 2026",
-        status: "won",
-    },
+const DEFAULT_DEALS: DealRecord[] = [];
+const LEGACY_SEEDED_DEAL_NAMES = [
+    "Web Design Retainer",
+    "Deal 1",
+    "Deal 2",
+    "Deal 3",
+    "Deal name 5",
 ];
+
+const isLegacySeededDeals = (rows: DealRecord[]) =>
+    rows.length > 0 &&
+    rows.length <= LEGACY_SEEDED_DEAL_NAMES.length &&
+    rows.every(row => LEGACY_SEEDED_DEAL_NAMES.includes(row.name));
 
 const dealStageTone = (stage: string) => {
     const key = stage.toLowerCase();
@@ -2239,11 +2255,66 @@ const parseDealDays = (value: string) => {
 };
 
 const formatDealValue = (value: number) =>
-    new Intl.NumberFormat("en-US", {
+    new Intl.NumberFormat("en-IN", {
         style: "currency",
-        currency: "USD",
+        currency: "INR",
         maximumFractionDigits: 0,
     }).format(value);
+
+const readStoredRows = (key: string): TableRow[] => {
+    try {
+        const stored = localStorage.getItem(key);
+        return stored ? JSON.parse(stored) : [];
+    } catch {
+        return [];
+    }
+};
+
+const normaliseLookupKey = (value: unknown) =>
+    String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+const hasMeaningfulValue = (value: unknown) => {
+    const normalised = String(value || "").trim().toLowerCase();
+    return !["", "--", "tbd", "unassigned", "closed", "none", "no owner"].includes(normalised);
+};
+
+const parseLooseDate = (value: unknown) => {
+    const raw = String(value || "").trim();
+    if (!hasMeaningfulValue(raw)) return null;
+
+    const parsed = Date.parse(raw);
+    if (!Number.isNaN(parsed)) return new Date(parsed);
+
+    const currentYear = new Date().getFullYear();
+    const parsedWithYear = Date.parse(`${raw}, ${currentYear}`);
+    if (!Number.isNaN(parsedWithYear)) return new Date(parsedWithYear);
+
+    return null;
+};
+
+const daysBetween = (target: Date, base = new Date()) =>
+    Math.round((target.getTime() - base.getTime()) / 86400000);
+
+const formatRelativeDayLabel = (date: Date | null) => {
+    if (!date) return "No dated activity";
+    const delta = daysBetween(date);
+    if (delta === 0) return "Today";
+    if (delta === -1) return "1d ago";
+    if (delta < 0) return `${Math.abs(delta)}d ago`;
+    if (delta === 1) return "In 1d";
+    return `In ${delta}d`;
+};
+
+const extractParsedActivityDate = (row: TableRow) =>
+    parseLooseDate(row["Date"] || row["Meeting date"] || row["Call date"]);
+
+const upsertAgentResults = (current: AgentResult[], incoming: AgentResult) => {
+    const nextKey = normaliseLookupKey(incoming.companyName);
+    if (!nextKey) return [incoming, ...current];
+    return [incoming, ...current.filter(result => normaliseLookupKey(result.companyName) !== nextKey)];
+};
 
 const ownerInitials = (name: string) =>
     String(name || "?")
@@ -2333,6 +2404,8 @@ function DealsTableSection({
     isOpen,
     onToggle,
     onAddDeal,
+    selectedDealIds,
+    toggleDealSelection,
     updateDeal,
 }: {
     title: string;
@@ -2343,6 +2416,8 @@ function DealsTableSection({
     isOpen: boolean;
     onToggle: () => void;
     onAddDeal: () => void;
+    selectedDealIds: number[];
+    toggleDealSelection: (id: number) => void;
     updateDeal: (id: number, field: keyof DealRecord, value: string) => void;
 }) {
     const totalValue = deals.reduce((sum, deal) => sum + parseDealValue(deal.value), 0);
@@ -2380,10 +2455,8 @@ function DealsTableSection({
                         <table className="min-w-[1120px] w-full text-sm border-collapse">
                             <thead>
                                 <tr className="bg-slate-50 border-b border-gray-200">
-                                    <th className="w-10 px-3 py-2.5 border-r border-gray-200">
-                                        <input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" />
-                                    </th>
-                                    {["Deal", "Stage", "Owner", "Deal Value", "Contacts", "Accounts", "Priority", "Deal length", "Expected Close"].map(header => (
+                                    <th className="w-10 px-3 py-2.5 border-r border-gray-200" />
+                                    {["Deal", "Stage", "Owner", "Deal Value", "Contacts", "Companies", "Priority", "Deal length", "Expected Close"].map(header => (
                                         <th
                                             key={header}
                                             className="whitespace-nowrap border-r border-gray-200 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 last:border-r-0"
@@ -2404,7 +2477,12 @@ function DealsTableSection({
                                     deals.map(deal => (
                                         <tr key={deal.id} className="border-b border-gray-100 align-top hover:bg-sky-50/20 transition-colors">
                                             <td className="px-3 py-3 border-r border-gray-200 text-center">
-                                                <input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" />
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedDealIds.includes(deal.id)}
+                                                    onChange={() => toggleDealSelection(deal.id)}
+                                                    className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500"
+                                                />
                                             </td>
                                             <td className="px-3 py-3 border-r border-gray-200">
                                                 <div className="space-y-1">
@@ -2517,17 +2595,24 @@ function DealsView() {
     const [deals, setDeals] = useState<DealRecord[]>(() => {
         try {
             const stored = localStorage.getItem(DEALS_STORAGE_KEY);
-            return stored ? JSON.parse(stored) : DEFAULT_DEALS;
+            if (!stored) return DEFAULT_DEALS;
+            const parsed = JSON.parse(stored) as DealRecord[];
+            return isLegacySeededDeals(parsed) ? [] : parsed;
         } catch {
             return DEFAULT_DEALS;
         }
     });
     const [sectionsOpen, setSectionsOpen] = useState({ active: true, won: true });
+    const [selectedDealIds, setSelectedDealIds] = useState<number[]>([]);
 
     useEffect(() => {
         try {
             localStorage.setItem(DEALS_STORAGE_KEY, JSON.stringify(deals));
         } catch {}
+    }, [deals]);
+
+    useEffect(() => {
+        setSelectedDealIds(current => current.filter(id => deals.some(deal => deal.id === id)));
     }, [deals]);
 
     const updateDeal = (id: number, field: keyof DealRecord, value: string) => {
@@ -2562,6 +2647,19 @@ function DealsView() {
             status === "active" ? [newDeal, ...current] : [...current, newDeal]
         );
         setSectionsOpen(current => ({ ...current, [status]: true }));
+    };
+
+    const toggleDealSelection = (id: number) => {
+        setSelectedDealIds(current =>
+            current.includes(id)
+                ? current.filter(selectedId => selectedId !== id)
+                : [...current, id]
+        );
+    };
+
+    const deleteSelectedDeals = () => {
+        setDeals(current => current.filter(deal => !selectedDealIds.includes(deal.id)));
+        setSelectedDealIds([]);
     };
 
     const filteredDeals = useMemo(() => {
@@ -2629,11 +2727,21 @@ function DealsView() {
                             type="text"
                             value={tableSearch}
                             onChange={e => setTableSearch(e.target.value)}
-                            placeholder="Search deals, contacts, accounts, or owners..."
+                            placeholder="Search deals, contacts, companies, or owners..."
                             className="w-full rounded-md border border-gray-300 py-2 pl-8 pr-3 text-xs focus:outline-none focus:border-sky-400"
                         />
                     </div>
-                    <div className="text-xs text-gray-400">Double-click any text cell to edit it.</div>
+                    <div className="ml-auto flex items-center gap-2">
+                        {selectedDealIds.length > 0 && (
+                            <button
+                                onClick={deleteSelectedDeals}
+                                className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-100 transition-colors"
+                            >
+                                Delete selected ({selectedDealIds.length})
+                            </button>
+                        )}
+                        <div className="text-xs text-gray-400">Double-click any text cell to edit it.</div>
+                    </div>
                 </div>
 
                 <div className="space-y-4 p-4">
@@ -2646,6 +2754,8 @@ function DealsView() {
                         isOpen={sectionsOpen.active}
                         onToggle={() => setSectionsOpen(current => ({ ...current, active: !current.active }))}
                         onAddDeal={() => addDeal("active")}
+                        selectedDealIds={selectedDealIds}
+                        toggleDealSelection={toggleDealSelection}
                         updateDeal={updateDeal}
                     />
                     <DealsTableSection
@@ -2657,11 +2767,222 @@ function DealsView() {
                         isOpen={sectionsOpen.won}
                         onToggle={() => setSectionsOpen(current => ({ ...current, won: !current.won }))}
                         onAddDeal={() => addDeal("won")}
+                        selectedDealIds={selectedDealIds}
+                        toggleDealSelection={toggleDealSelection}
                         updateDeal={updateDeal}
                     />
                 </div>
             </div>
         </div>
+    );
+}
+
+function ActivityTableView({
+    title,
+    description,
+    storageKey,
+    addLabel,
+    columns,
+    createRow,
+    emptyMessage,
+}: {
+    title: string;
+    description: string;
+    storageKey: string;
+    addLabel: string;
+    columns: string[];
+    createRow: () => TableRow;
+    emptyMessage: string;
+}) {
+    const [tableSearch, setTableSearch] = useState("");
+    const [rows, setRows] = useState<TableRow[]>(() => {
+        try {
+            const stored = localStorage.getItem(storageKey);
+            return stored ? JSON.parse(stored) : [];
+        } catch {
+            return [];
+        }
+    });
+    const [selectedRowIds, setSelectedRowIds] = useState<number[]>([]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(storageKey, JSON.stringify(rows));
+        } catch {}
+    }, [rows, storageKey]);
+
+    useEffect(() => {
+        setSelectedRowIds(current => current.filter(id => rows.some(row => row.id === id)));
+    }, [rows]);
+
+    const updateRow = (id: number, field: string, value: string) => {
+        setRows(current => current.map(row => (row.id === id ? { ...row, [field]: value } : row)));
+    };
+
+    const addRow = () => {
+        setRows(current => [createRow(), ...current]);
+    };
+
+    const toggleRowSelection = (id: number) => {
+        setSelectedRowIds(current =>
+            current.includes(id)
+                ? current.filter(selectedId => selectedId !== id)
+                : [...current, id]
+        );
+    };
+
+    const deleteSelectedRows = () => {
+        setRows(current => current.filter(row => !selectedRowIds.includes(row.id)));
+        setSelectedRowIds([]);
+    };
+
+    const filteredRows = useMemo(() => {
+        const query = tableSearch.trim().toLowerCase();
+        if (!query) return rows;
+        return rows.filter(row =>
+            columns.some(column => String(row[column] || "").toLowerCase().includes(query))
+        );
+    }, [columns, rows, tableSearch]);
+
+    return (
+        <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div>
+                        <h1 className="text-lg font-bold text-gray-900">{title}</h1>
+                        <p className="text-xs text-gray-400 mt-1">{description}</p>
+                    </div>
+                    <button
+                        onClick={addRow}
+                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white hover:opacity-90 transition-opacity"
+                        style={{ background: "linear-gradient(135deg,#0ea5e9,#14b8a6)" }}
+                    >
+                        <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                            <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                        </svg>
+                        {addLabel}
+                    </button>
+                </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="flex items-center gap-3 border-b border-gray-100 px-6 py-4 flex-wrap">
+                    <div className="relative flex-1 min-w-[240px]">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400">
+                            <SearchIcon />
+                        </span>
+                        <input
+                            type="text"
+                            value={tableSearch}
+                            onChange={e => setTableSearch(e.target.value)}
+                            placeholder={`Search ${title.toLowerCase()}...`}
+                            className="w-full rounded-md border border-gray-300 py-2 pl-8 pr-3 text-xs focus:outline-none focus:border-sky-400"
+                        />
+                    </div>
+                    {selectedRowIds.length > 0 && (
+                        <button
+                            onClick={deleteSelectedRows}
+                            className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-100 transition-colors"
+                        >
+                            Delete selected ({selectedRowIds.length})
+                        </button>
+                    )}
+                </div>
+
+                <div className="overflow-x-auto">
+                    <table className="min-w-[980px] w-full text-sm border-collapse">
+                        <thead>
+                            <tr className="bg-slate-50 border-b border-gray-200">
+                                <th className="w-10 px-3 py-2.5 border-r border-gray-200" />
+                                {columns.map(column => (
+                                    <th
+                                        key={column}
+                                        className="whitespace-nowrap border-r border-gray-200 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 last:border-r-0"
+                                    >
+                                        {column}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filteredRows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={columns.length + 1} className="px-4 py-10 text-center text-sm text-gray-400">
+                                        {emptyMessage}
+                                    </td>
+                                </tr>
+                            ) : (
+                                filteredRows.map(row => (
+                                    <tr key={row.id} className="border-b border-gray-100 hover:bg-sky-50/20 transition-colors">
+                                        <td className="px-3 py-3 border-r border-gray-200 text-center">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedRowIds.includes(row.id)}
+                                                onChange={() => toggleRowSelection(row.id)}
+                                                className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500"
+                                            />
+                                        </td>
+                                        {columns.map((column, index) => (
+                                            <td key={column} className="px-3 py-3 border-r border-gray-200 last:border-r-0">
+                                                <EditableCell
+                                                    value={row[column] || "--"}
+                                                    onChange={value => updateRow(row.id, column, value)}
+                                                    className={index === 0 ? "text-sm font-semibold text-gray-900" : "text-sm text-gray-600"}
+                                                />
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function MeetingsView() {
+    return (
+        <ActivityTableView
+            title="Meetings"
+            description="Track scheduled meetings, owners, and next steps in the same table-driven layout as the rest of the CRM."
+            storageKey="custbuds_meetings"
+            addLabel="Add meeting"
+            columns={["Meeting", "Company", "Owner", "Date", "Status", "Next Step"]}
+            createRow={() => ({
+                id: Date.now(),
+                "Meeting": "New meeting",
+                "Company": "--",
+                "Owner": "Unassigned",
+                "Date": "TBD",
+                "Status": "Planned",
+                "Next Step": "--",
+            })}
+            emptyMessage="No meetings yet. Add one to start tracking your schedule."
+        />
+    );
+}
+
+function CallsView() {
+    return (
+        <ActivityTableView
+            title="Calls"
+            description="Log call activity, attach owners, and keep follow-up actions visible from one shared table view."
+            storageKey="custbuds_calls"
+            addLabel="Add call"
+            columns={["Call", "Company", "Contact", "Owner", "Date", "Status"]}
+            createRow={() => ({
+                id: Date.now(),
+                "Call": "New call",
+                "Company": "--",
+                "Contact": "--",
+                "Owner": "Unassigned",
+                "Date": "TBD",
+                "Status": "Scheduled",
+            })}
+            emptyMessage="No calls logged yet. Add one to build your call history."
+        />
     );
 }
 
@@ -2677,13 +2998,13 @@ function PlaceholderView({ title, desc }: { title: string; desc: string }) {
     );
 }
 
-/* ───────── Root Dashboard ───────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Root Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export default function CRMDashboard() {
     const [bannerVisible, setBannerVisible] = useState(true);
     const [searchValue, setSearchValue] = useState("");
     const [activeNav, setActiveNav] = useState("companies");
 
-    // ── Prospecting Agent state ─────────────────────────────────
+    // â”€â”€ Prospecting Agent state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // isProspecting: true while we're waiting for the backend to respond
     const [isProspecting, setIsProspecting] = useState(false);
     // agentResult: populated once the backend returns
@@ -2694,7 +3015,7 @@ export default function CRMDashboard() {
     useEffect(() => { try { localStorage.setItem("custbuds_agent_results", JSON.stringify(agentResults)); } catch {} }, [agentResults]);
     const [agentResult, setAgentResult] = useState<AgentResult | null>(null);
 
-    // ── Avatar Options ──
+    // â”€â”€ Avatar Options â”€â”€
     const accounts = [
         { name: "Shlok Parekh", email: "shlok@custbuds.com", color: "#0ea5e9" },
         { name: "Sales Team", email: "sales@custbuds.com", color: "#f59e0b" },
@@ -2725,7 +3046,7 @@ export default function CRMDashboard() {
         setIsProspecting(false);
         if (result) {
             setAgentResult(result);
-            setAgentResults(prev => [result, ...prev]);
+            setAgentResults(prev => upsertAgentResults(prev, result));
             setActiveNav("companies");
         }
     };
@@ -2737,7 +3058,7 @@ export default function CRMDashboard() {
         setActiveNav("companies");
     };
 
-    // ── Prospect All: iterate over all saved companies and prospect each ──
+    // â”€â”€ Prospect All: iterate over all saved companies and prospect each â”€â”€
     const handleProspectAll = async () => {
         let companies: any[] = [];
         try { const s = localStorage.getItem("custbuds_companies"); if (s) companies = JSON.parse(s); } catch {}
@@ -2748,18 +3069,22 @@ export default function CRMDashboard() {
 
         for (const company of companies) {
             const name = company["Company name"] || company.name || "";
-            const domain = company.domain || "";
-            if (!name && !domain) continue;
+            if (!name) continue;
             try {
-                const res = await fetch("http://localhost:5000/api/prospect", {
+                const res = await fetch("http://localhost:5000/api/agent/prospect", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ companyName: name, domain }),
+                    body: JSON.stringify({
+                        companyName: name,
+                        city: company["City"] || company.city || "",
+                        companySize: company["Company Size"] || company.companySize || "",
+                        type: company["Type"] || company.type || "Prospect",
+                    }),
                 });
                 if (res.ok) {
-                    const data = await res.json();
+                    const data: AgentResult = await res.json();
                     const result: AgentResult = { ...data, companyName: name };
-                    setAgentResults(prev => [result, ...prev]);
+                    setAgentResults(prev => upsertAgentResults(prev, result));
                     setAgentResult(result);
                 }
             } catch {}
@@ -2767,7 +3092,7 @@ export default function CRMDashboard() {
         setIsProspecting(false);
     };
 
-    // ── Interactive Gmail Connect State ──
+    // â”€â”€ Interactive Gmail Connect State â”€â”€
     const [isConnectingGmail, setIsConnectingGmail] = useState(false);
     const [isGmailConnected, setIsGmailConnected] = useState(false);
 
@@ -2796,14 +3121,9 @@ export default function CRMDashboard() {
     // Upgraded Agent SVGs
     const SparklesIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>;
     const TargetIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>;
-    const ShieldIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>;
-    const EyeIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;
-
     const agentNav = [
         { id: "prospecting", label: "Prospecting",    icon: SparklesIcon },
         { id: "deal-intel",  label: "Deal Intel",     icon: TargetIcon },
-        { id: "retention",   label: "Retention",      icon: ShieldIcon },
-        { id: "competitive", label: "Competitive",    icon: EyeIcon },
     ];
 
     const NavBtn = ({ id, label, icon, grad }: { id: string; label: string; icon?: React.ReactNode; grad?: string }) => {
@@ -2966,7 +3286,7 @@ export default function CRMDashboard() {
                                             Connecting...
                                         </>
                                     ) : isGmailConnected ? (
-                                        <>✓ Connected</>
+                                        <>Connected</>
                                     ) : (
                                         <>
                                             <GmailIcon />
@@ -2977,17 +3297,17 @@ export default function CRMDashboard() {
                             </div>
                         )}
 
-                        {/* ── Prospecting Loading Banner ── */}
+                        {/* â”€â”€ Prospecting Loading Banner â”€â”€ */}
                         {isProspecting && (
                             <div className="flex items-center gap-3 px-5 py-3.5 rounded-xl border border-sky-200 shadow-sm"
                                 style={{ background: "linear-gradient(135deg,#e0f2fe,#f0f9ff)" }}>
                                 <div className="w-2 h-2 rounded-full bg-sky-400 animate-ping flex-shrink-0" />
-                                <span className="text-sm font-semibold text-sky-800">Prospecting Agent is researching your target…</span>
-                                <span className="text-xs text-sky-500 ml-auto">This takes ~5–10 seconds</span>
+                                <span className="text-sm font-semibold text-sky-800">Prospecting Agent is researching your target...</span>
+                                <span className="text-xs text-sky-500 ml-auto">This takes ~5-10 seconds</span>
                             </div>
                         )}
 
-                        {/* ── Agent Result Panel ── */}
+                        {/* â”€â”€ Agent Result Panel â”€â”€ */}
                         {agentResult && (
                             <AgentResultPanel
                                 result={agentResult}
@@ -2998,12 +3318,10 @@ export default function CRMDashboard() {
                         {activeNav === "contacts" ? <ContactsView /> :
                          activeNav === "companies" ? <CompaniesView onAgentStart={handleAgentStart} onAgentResult={handleAgentResult} /> :
                          activeNav === "deals" ? <DealsView /> :
-                         activeNav === "meetings" ? <PlaceholderView title="Meetings" desc="Schedule, review, and follow up on your upcoming and past meetings." /> :
-                         activeNav === "calls" ? <PlaceholderView title="Calls" desc="Log calls, review call transcripts, and track your outreach." /> :
-                         activeNav === "prospecting" ? <ProspectingAgentView agentResults={agentResults} onProspectAll={handleProspectAll} /> :
-                         activeNav === "deal-intel" ? <DealIntelligenceView /> :
-                         activeNav === "retention" ? <RevenueRetentionView /> :
-                         activeNav === "competitive" ? <CompetitiveIntelligenceView /> :
+                         activeNav === "meetings" ? <MeetingsView /> :
+                         activeNav === "calls" ? <CallsView /> :
+                         activeNav === "prospecting" ? <ProspectingAgentView agentResults={agentResults} onProspectAll={handleProspectAll} isProspecting={isProspecting} /> :
+                         activeNav === "deal-intel" ? <DealIntelligenceView agentResults={agentResults} /> :
                          <CompaniesView onAgentStart={handleAgentStart} onAgentResult={handleAgentResult} />}
                     </div>
                 </main>
