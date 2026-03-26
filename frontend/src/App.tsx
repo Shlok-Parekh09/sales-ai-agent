@@ -637,7 +637,7 @@ function ImportModal({ columns, onClose, onImport }: {
 
 /* ───────── Create Contact Modal ───────── */
 function CreateContactModal({ onClose, onSave }: { onClose: () => void; onSave: (form: any) => void; }) {
-    const [form, setForm] = useState({ email: "", firstName: "", lastName: "", owner: "Shlok Parekh", jobTitle: "", phone: "" });
+    const [form, setForm] = useState({ email: "", firstName: "", lastName: "", jobTitle: "", phone: "" });
     const set = (k: string) => (e: any) => setForm(f => ({ ...f, [k]: e.target.value }));
     const showHint = !form.email && !form.firstName && !form.lastName;
     return (
@@ -660,11 +660,6 @@ function CreateContactModal({ onClose, onSave }: { onClose: () => void; onSave: 
                         <label className="block text-xs font-semibold text-gray-800 mb-1.5">Last name</label>
                         <input value={form.lastName} onChange={set("lastName")} className="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-white focus:outline-none focus:border-sky-400 transition-colors" />
                     </div>
-                    <div>
-                        <label className="block text-xs font-medium text-gray-400 mb-1.5">Contact owner</label>
-                        <input value={form.owner} onChange={set("owner")} placeholder="Enter owner name"
-                            className="w-full border border-gray-200 rounded px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:border-sky-400 transition-colors" />
-                    </div>
 
                     <div>
                         <label className="block text-xs font-medium text-gray-400 mb-1">Job title</label>
@@ -678,7 +673,7 @@ function CreateContactModal({ onClose, onSave }: { onClose: () => void; onSave: 
                 <div className="flex items-center gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
                     <button onClick={() => { if (form.email || form.firstName || form.lastName) { onSave(form); onClose(); } else alert("Please enter a name or email."); }}
                         className="px-4 py-2 text-sm font-semibold text-white rounded-md hover:opacity-90" style={{ background: "#0ea5e9" }}>Create</button>
-                    <button onClick={() => { if (form.email || form.firstName || form.lastName) { onSave(form); setForm({ email: "", firstName: "", lastName: "", owner: "Shlok Parekh", jobTitle: "", phone: "" }); } }}
+                    <button onClick={() => { if (form.email || form.firstName || form.lastName) { onSave(form); setForm({ email: "", firstName: "", lastName: "", jobTitle: "", phone: "" }); } }}
                         className="px-4 py-2 text-sm font-medium text-sky-700 border border-sky-300 rounded-md hover:bg-sky-50">Create and add another</button>
                     <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-sky-700 border-2 border-sky-700 rounded-md hover:bg-sky-50 ml-auto">Cancel</button>
                 </div>
@@ -706,8 +701,16 @@ function ContactsView() {
     const menuRef = useRef<HTMLDivElement>(null);
 
     const [columns, setColumns] = useState<string[]>(() => {
-        try { const s = localStorage.getItem(CONTACTS_COLS_KEY); return s ? JSON.parse(s) : ["Name", "Email", "Phone Number", "Contact owner"]; }
-        catch { return ["Name", "Email", "Phone Number", "Contact owner"]; }
+        const stripOwnerCols = (cols: any[]): string[] =>
+            (cols || []).filter(c => typeof c === "string" && !c.toLowerCase().includes("owner"));
+        try {
+            const s = localStorage.getItem(CONTACTS_COLS_KEY);
+            const parsed = s ? (JSON.parse(s) as any[]) : ["Name", "Email", "Phone Number", "Contact owner"];
+            const cleaned = stripOwnerCols(parsed);
+            return cleaned.length ? cleaned : ["Name", "Email", "Phone Number"];
+        } catch {
+            return ["Name", "Email", "Phone Number"];
+        }
     });
 
     const [contacts, setContacts] = useState<TableRow[]>(() => {
@@ -740,7 +743,6 @@ function ContactsView() {
             "Name": fullName,
             "Email": form.email || "--",
             "Phone Number": form.phone || "--",
-            "Contact owner": form.owner || "No owner",
         }]);
     };
 
@@ -1040,17 +1042,26 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
     const menuRef = useRef<HTMLDivElement>(null);
 
     const [columns, setColumns] = useState<string[]>(() => {
-        try { 
-            const s = localStorage.getItem("custbuds_company_cols"); 
-            let parsed = s ? JSON.parse(s) : ["Company name", "Create Date (IST)", "Email ID", "City", "Company Size", "Annual Revenue"]; 
+        const stripOwnerCols = (cols: any[]): string[] =>
+            (cols || []).filter(c => typeof c === "string" && !c.toLowerCase().includes("owner")) as string[];
+        try {
+            const s = localStorage.getItem("custbuds_company_cols");
+            let parsed = s ? JSON.parse(s) : ["Company name", "Date created", "Email ID", "City", "Company Size", "Annual Revenue"];
+            parsed = stripOwnerCols(parsed);
             return parsed.map((c: string) => {
                 if (c === "Phone Number" || c === "Email") return "Email ID";
-                if (c === "Create Date (GMT +5:30)") return "Create Date (IST)";
+                if (c === "Create Date (GMT +5:30)") return "Date created";
+                if (c === "Create Date (IST)") return "Date created";
                 return c;
             });
+        } catch {
+            return ["Company name", "Date created", "Email ID", "City", "Company Size", "Annual Revenue"];
         }
-        catch { return ["Company name", "Create Date (IST)", "Email ID", "City", "Company Size", "Annual Revenue"]; }
     });
+
+    useEffect(() => {
+        setColumns(prev => prev.filter(c => typeof c === "string" && !c.toLowerCase().includes("owner")));
+    }, []);
 
     const [companies, setCompanies] = useState<TableRow[]>(() => {
         try {
@@ -1060,6 +1071,11 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
             const parsed = JSON.parse(s);
             return parsed.map((c: any) => {
                 const migrated = { ...c };
+                // Legacy key migration
+                if (migrated["Create Date (IST)"] !== undefined) {
+                    migrated["Date created"] = migrated["Create Date (IST)"];
+                    delete migrated["Create Date (IST)"];
+                }
                 if (migrated["Phone Number"] !== undefined) {
                     migrated["Email ID"] = migrated["Phone Number"];
                     delete migrated["Phone Number"];
@@ -1069,7 +1085,7 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                     delete migrated["Email"];
                 }
                 if (migrated["Create Date (GMT +5:30)"] !== undefined) {
-                    migrated["Create Date (IST)"] = migrated["Create Date (GMT +5:30)"];
+                    migrated["Date created"] = migrated["Create Date (GMT +5:30)"];
                     delete migrated["Create Date (GMT +5:30)"];
                 }
                 return migrated;
@@ -1093,7 +1109,7 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
             {
                 id: Date.now(),
                 "Company name": form.name || form.domain || "New Company",
-                "Create Date (IST)": "Just now",
+                "Date created": "Just now",
                 "Email ID": form.email || "--",
                 "City": form.city || "--",
                 "Company Size": form.companySize || "--",
@@ -1281,7 +1297,7 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                             </button>
                             {showSort && (
                                 <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 shadow-xl rounded-lg z-20 overflow-hidden py-1">
-                                    {["Annual Revenue", "Company name", "Create Date (IST)"].map(opt => (
+                                    {["Annual Revenue", "Company name", "Date created"].map(opt => (
                                         <button key={opt} onClick={() => {
                                             if (sortRule.col === opt) setSortRule({ col: opt, asc: !sortRule.asc });
                                             else setSortRule({ col: opt, asc: true });
