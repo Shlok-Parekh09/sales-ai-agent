@@ -101,6 +101,21 @@ type DealIntelAlert = {
     tone: "danger" | "info" | "positive";
 };
 
+type DealIntelRemoteAlert = DealIntelAlert & {
+    dealId: number;
+};
+
+type DealIntelRemoteMonitor = DealIntelRecovery & {
+    dealId: number;
+};
+
+type DealIntelModelResponse = {
+    generatedAt?: string;
+    fallback?: boolean;
+    alerts: DealIntelRemoteAlert[];
+    monitor: DealIntelRemoteMonitor[];
+};
+
 type DealHeatmapRow = {
     name: string;
     bars: number[];
@@ -676,11 +691,133 @@ function ImportModal({ columns, onClose, onImport }: {
     const [error, setError] = useState("");
     const [preview, setPreview] = useState<{ headers: string[]; rows: string[][] } | null>(null);
 
+    const normaliseHeader = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const tokeniseHeader = (value: string) =>
+        value
+            .toLowerCase()
+            .split(/[^a-z0-9]+/)
+            .filter(Boolean)
+            .map(token => {
+                if (token.endsWith("ies") && token.length > 3) return `${token.slice(0, -3)}y`;
+                if (token.endsWith("ed") && token.length > 4) return token.slice(0, -1);
+                if (token.endsWith("s") && token.length > 3) return token.slice(0, -1);
+                return token;
+            });
+
+    const findMatchingHeaderIndex = (headers: string[], column: string) => {
+        const columnNormalised = normaliseHeader(column);
+        const columnTokens = tokeniseHeader(column);
+        let bestIndex = -1;
+        let bestScore = -1;
+
+        headers.forEach((header, index) => {
+            const headerNormalised = normaliseHeader(header);
+            const headerTokens = tokeniseHeader(header);
+            let score = -1;
+
+            if (headerNormalised === columnNormalised) {
+                score = 4;
+            } else if (headerTokens.join("") === columnTokens.join("")) {
+                score = 3;
+            } else if (
+                columnTokens.length > 1 &&
+                columnTokens.every(token => headerTokens.includes(token))
+            ) {
+                score = 2;
+            } else if (
+                headerTokens.length > 1 &&
+                headerTokens.every(token => columnTokens.includes(token))
+            ) {
+                score = 1;
+            }
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestIndex = index;
+            }
+        });
+
+        return bestScore >= 0 ? bestIndex : -1;
+    };
+
+    const reconcileRowLength = (headers: string[], row: string[]) => {
+        if (row.length === headers.length) return row;
+
+        let nextRow = [...row];
+        if (nextRow.length > headers.length) {
+            const moneyColumnIndex = headers.findIndex(header =>
+                /(dealvalue|amount|revenue|value)/.test(normaliseHeader(header))
+            );
+
+            if (moneyColumnIndex >= 0) {
+                const extraCells = nextRow.length - headers.length;
+                const mergedValue = nextRow
+                    .slice(moneyColumnIndex, moneyColumnIndex + extraCells + 1)
+                    .join(",");
+                nextRow = [
+                    ...nextRow.slice(0, moneyColumnIndex),
+                    mergedValue,
+                    ...nextRow.slice(moneyColumnIndex + extraCells + 1),
+                ];
+            }
+        }
+
+        if (nextRow.length < headers.length) {
+            return [...nextRow, ...Array(headers.length - nextRow.length).fill("")];
+        }
+
+        return nextRow.slice(0, headers.length);
+    };
+
     const parseCSV = (text: string) => {
-        const lines = text.split(/\r?\n/).filter(Boolean);
-        if (lines.length < 2) return null;
-        const headers = lines[0].split(",").map(s => s.trim().replace(/^"|"$/g, ""));
-        const rows = lines.slice(1).map(l => l.split(",").map(s => s.trim().replace(/^"|"$/g, "")));
+        const source = text.replace(/^\uFEFF/, "");
+        const firstLine = source.split(/\r?\n/).find(line => line.trim() !== "") || "";
+        const delimiter = (firstLine.match(/\t/g) || []).length > (firstLine.match(/,/g) || []).length ? "\t" : ",";
+        const parsedRows: string[][] = [];
+        let currentRow: string[] = [];
+        let currentCell = "";
+        let inQuotes = false;
+
+        for (let i = 0; i < source.length; i += 1) {
+            const char = source[i];
+            const nextChar = source[i + 1];
+
+            if (char === '"') {
+                if (inQuotes && nextChar === '"') {
+                    currentCell += '"';
+                    i += 1;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+                continue;
+            }
+
+            if (!inQuotes && char === delimiter) {
+                currentRow.push(currentCell.trim());
+                currentCell = "";
+                continue;
+            }
+
+            if (!inQuotes && (char === "\n" || char === "\r")) {
+                if (char === "\r" && nextChar === "\n") i += 1;
+                currentRow.push(currentCell.trim());
+                currentCell = "";
+                if (currentRow.some(cell => cell !== "")) parsedRows.push(currentRow);
+                currentRow = [];
+                continue;
+            }
+
+            currentCell += char;
+        }
+
+        if (currentCell !== "" || currentRow.length > 0) {
+            currentRow.push(currentCell.trim());
+            if (currentRow.some(cell => cell !== "")) parsedRows.push(currentRow);
+        }
+
+        if (parsedRows.length < 2) return null;
+        const [headers, ...dataRows] = parsedRows;
+        const rows = dataRows.map(row => reconcileRowLength(headers, row));
         return { headers, rows };
     };
 
@@ -704,11 +841,7 @@ function ImportModal({ columns, onClose, onImport }: {
         const { headers, rows } = preview;
         const colMap: Record<string, number> = {};
         columns.forEach(col => {
-            const colLower = col.toLowerCase().replace(/[^a-z0-9]/g, "");
-            const idx = headers.findIndex(h => {
-                const hLower = h.toLowerCase().replace(/[^a-z0-9]/g, "");
-                return hLower === colLower || hLower.includes(colLower) || colLower.includes(hLower);
-            });
+            const idx = findMatchingHeaderIndex(headers, col);
             if (idx >= 0) colMap[col] = idx;
         });
         const mapped: Record<string, string>[] = rows.map(row => {
@@ -767,6 +900,106 @@ function ImportModal({ columns, onClose, onImport }: {
     );
 }
 
+function AddOptionsMenu({
+    buttonLabel,
+    onCreate,
+    onImport,
+}: {
+    buttonLabel: string;
+    onCreate: () => void;
+    onImport: () => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e: MouseEvent) => {
+            if (
+                menuRef.current && !menuRef.current.contains(e.target as Node) &&
+                buttonRef.current && !buttonRef.current.contains(e.target as Node)
+            ) {
+                setOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [open]);
+
+    return (
+        <div className="relative">
+            <button
+                ref={buttonRef}
+                onClick={() => setOpen(current => !current)}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white hover:opacity-90 transition-opacity"
+                style={{ background: "linear-gradient(135deg,#0ea5e9,#14b8a6)" }}
+            >
+                <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                    <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                </svg>
+                {buttonLabel}
+                <ChevronDownIcon />
+            </button>
+            {open && (
+                <div
+                    ref={menuRef}
+                    className="absolute right-0 mt-1.5 w-44 bg-white border border-gray-200 rounded-lg shadow-xl z-30 py-1 overflow-hidden"
+                >
+                    <button
+                        onClick={() => {
+                            setOpen(false);
+                            onCreate();
+                        }}
+                        className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                        Create new
+                    </button>
+                    <button
+                        onClick={() => {
+                            setOpen(false);
+                            onImport();
+                        }}
+                        className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                        Import
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function SelectAllCheckbox({
+    checked,
+    indeterminate,
+    onChange,
+    className = "",
+}: {
+    checked: boolean;
+    indeterminate: boolean;
+    onChange: () => void;
+    className?: string;
+}) {
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        if (inputRef.current) {
+            inputRef.current.indeterminate = indeterminate && !checked;
+        }
+    }, [checked, indeterminate]);
+
+    return (
+        <input
+            ref={inputRef}
+            type="checkbox"
+            checked={checked}
+            onChange={onChange}
+            className={`w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500 ${className}`}
+        />
+    );
+}
+
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Create Contact Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function CreateContactModal({ onClose, onSave }: { onClose: () => void; onSave: (form: any) => void; }) {
     const [form, setForm] = useState({ email: "", firstName: "", lastName: "", jobTitle: "", phone: "" });
@@ -814,6 +1047,64 @@ function CreateContactModal({ onClose, onSave }: { onClose: () => void; onSave: 
     );
 }
 
+function ContactDetailsModal({
+    contact,
+    columns,
+    onClose,
+}: {
+    contact: TableRow;
+    columns: string[];
+    onClose: () => void;
+}) {
+    const displayName = String(contact["Name"] || contact["Email"] || "Contact").trim();
+    const avatarLetter = displayName.charAt(0).toUpperCase() || "?";
+    const orderedFields = Array.from(
+        new Set([
+            ...columns.filter(column => column !== "id"),
+            ...Object.keys(contact).filter(key => key !== "id"),
+        ])
+    );
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
+            <div className="bg-white rounded-xl shadow-2xl w-[520px] max-h-[88vh] flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                    <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Contact Details</h2>
+                        <p className="text-xs text-gray-400 mt-0.5">Full details for this contact</p>
+                    </div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100">
+                        <XIcon size="w-5 h-5" />
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                    <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-5">
+                        <div className="flex items-center gap-4">
+                            <div className="w-14 h-14 rounded-full bg-sky-500 text-white flex items-center justify-center text-xl font-bold flex-shrink-0">
+                                {avatarLetter}
+                            </div>
+                            <div className="min-w-0">
+                                <div className="text-lg font-bold text-gray-900 break-words">{displayName}</div>
+                                <div className="text-sm text-slate-500 break-words">{String(contact["Email"] || "No email")}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                        {orderedFields.map(field => (
+                            <div key={field} className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">{field}</div>
+                                <div className="mt-1 text-sm text-gray-800 break-words">{String(contact[field] || "--")}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Contacts View â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const CONTACTS_KEY = "custbuds_contacts";
 const CONTACTS_COLS_KEY = "custbuds_contacts_cols";
@@ -823,6 +1114,7 @@ function ContactsView() {
     const [showImport, setShowImport] = useState(false);
     const [showCreateContact, setShowCreateContact] = useState(false);
     const [showAddMenu, setShowAddMenu] = useState(false);
+    const [selectedContactId, setSelectedContactId] = useState<number | null>(null);
 
     // â”€â”€ Pagination State â”€â”€
     const [pageSize, setPageSize] = useState(25);
@@ -850,6 +1142,7 @@ function ContactsView() {
             return s ? JSON.parse(s) : [];
         } catch { return []; }
     });
+    const [selectedContactIds, setSelectedContactIds] = useState<number[]>([]);
 
     const update = (id: number, field: string, val: string) =>
         setContacts(cs => cs.map(c => c.id === id ? { ...c, [field]: val } : c));
@@ -880,6 +1173,9 @@ function ContactsView() {
     // Persist contacts & columns to localStorage on every change
     useEffect(() => { try { localStorage.setItem(CONTACTS_KEY, JSON.stringify(contacts)); } catch {} }, [contacts]);
     useEffect(() => { try { localStorage.setItem(CONTACTS_COLS_KEY, JSON.stringify(columns)); } catch {} }, [columns]);
+    useEffect(() => {
+        setSelectedContactIds(current => current.filter(id => contacts.some(contact => contact.id === id)));
+    }, [contacts]);
 
     const filtered = contacts.filter(c =>
         !tableSearch ||
@@ -924,6 +1220,42 @@ function ContactsView() {
     }, [safeCurrentPage, currentPage]);
 
     const paginatedData = sortedFiltered.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize);
+    const visibleContactIds = paginatedData.map(contact => contact.id);
+    const allVisibleContactsSelected = visibleContactIds.length > 0 && visibleContactIds.every(id => selectedContactIds.includes(id));
+    const someVisibleContactsSelected = visibleContactIds.some(id => selectedContactIds.includes(id)) && !allVisibleContactsSelected;
+
+    const toggleContactSelection = (id: number) => {
+        setSelectedContactIds(current =>
+            current.includes(id)
+                ? current.filter(selectedId => selectedId !== id)
+                : [...current, id]
+        );
+    };
+
+    const toggleSelectAllContacts = () => {
+        setSelectedContactIds(current =>
+            allVisibleContactsSelected
+                ? current.filter(id => !visibleContactIds.includes(id))
+                : Array.from(new Set([...current, ...visibleContactIds]))
+        );
+    };
+
+    const deleteSelectedContacts = () => {
+        setContacts(current => current.filter(contact => !selectedContactIds.includes(contact.id)));
+        setSelectedContactIds([]);
+    };
+
+    const activeContact = selectedContactId !== null
+        ? contacts.find(contact => contact.id === selectedContactId) || null
+        : null;
+
+    const handleContactNameClick = (event: React.MouseEvent, contactId: number) => {
+        if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            setSelectedContactId(contactId);
+        }
+    };
 
     useEffect(() => {
         const handler = (e: MouseEvent) => {
@@ -940,6 +1272,7 @@ function ContactsView() {
         <>
             {showImport && <ImportModal columns={columns} onClose={() => setShowImport(false)} onImport={handleImport} />}
             {showCreateContact && <CreateContactModal onClose={() => setShowCreateContact(false)} onSave={handleSaveContact} />}
+            {activeContact && <ContactDetailsModal contact={activeContact} columns={columns} onClose={() => setSelectedContactId(null)} />}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="flex items-center justify-between px-4 pt-4 pb-0">
                     <button className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 hover:text-gray-600">Contacts <ChevronDownIcon /></button>
@@ -985,6 +1318,14 @@ function ContactsView() {
                     </div>
                     <button className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">Table view <ChevronDownIcon /></button>
                     <div className="flex items-center gap-1.5 ml-auto">
+                        {selectedContactIds.length > 0 && (
+                            <button
+                                onClick={deleteSelectedContacts}
+                                className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 transition-colors"
+                            >
+                                Delete selected ({selectedContactIds.length})
+                            </button>
+                        )}
                         <div className="relative">
                             <button onClick={() => setShowSort(v => !v)} className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm flex items-center gap-1">
                                 Sort {sortRule.col && <span className="text-sky-600 font-bold ml-1">({sortRule.col})</span>}
@@ -1020,7 +1361,13 @@ function ContactsView() {
                     <table style={{ minWidth: 'max-content', width: '100%' }} className="text-sm border-collapse">
                         <thead>
                             <tr className="bg-slate-50 border-b border-gray-200">
-                                <th className="w-8 px-2 py-2.5 border-r border-gray-200 bg-slate-50 sticky left-0 z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></th>
+                                <th className="w-8 px-2 py-2.5 border-r border-gray-200 bg-slate-50 sticky left-0 z-10">
+                                    <SelectAllCheckbox
+                                        checked={allVisibleContactsSelected}
+                                        indeterminate={someVisibleContactsSelected}
+                                        onChange={toggleSelectAllContacts}
+                                    />
+                                </th>
                                 {columns.map(h => (
                                     <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap border-r border-gray-200">
                                         {h}
@@ -1031,12 +1378,25 @@ function ContactsView() {
                         <tbody>
                             {paginatedData.map((c: any) => (
                                 <tr key={c.id} className="border-b border-gray-100 hover:bg-sky-50/20 transition-colors group">
-                                    <td className="w-8 px-2 py-3 border-r border-gray-200 bg-white group-hover:bg-sky-50/20 sticky left-0 text-center align-middle transition-colors z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></td>
+                                    <td className="w-8 px-2 py-3 border-r border-gray-200 bg-white group-hover:bg-sky-50/20 sticky left-0 text-center align-middle transition-colors z-10">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedContactIds.includes(c.id)}
+                                            onChange={() => toggleContactSelection(c.id)}
+                                            className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500"
+                                        />
+                                    </td>
                                     {columns.map((col, ci) => (
                                         <td key={col} className="px-3 py-3 border-r border-gray-200 relative">
                                             {ci === 0 ? (
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 border border-gray-200"><HubSpotLogoIcon /></div>
+                                                <div
+                                                    className="flex items-center gap-2"
+                                                    onClick={(event) => handleContactNameClick(event, c.id)}
+                                                    title="Ctrl + click to view full contact details"
+                                                >
+                                                    <div className="w-5 h-5 rounded-full flex-shrink-0 bg-sky-500 text-white text-[10px] font-bold flex items-center justify-center">
+                                                        {String(c[col] || c["Email"] || "?").trim().charAt(0).toUpperCase() || "?"}
+                                                    </div>
                                                     <EditableCell value={c[col] || "--"} onChange={v => update(c.id, col, v)} link className="text-sm font-medium" />
                                                 </div>
                                             ) : (
@@ -1122,6 +1482,7 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
     const [showAddMenu, setShowAddMenu] = useState(false);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showImport, setShowImport] = useState(false);
+    const [isProspectingSelected, setIsProspectingSelected] = useState(false);
 
     // â”€â”€ Pagination State â”€â”€
     const [pageSize, setPageSize] = useState(25);
@@ -1182,6 +1543,7 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
             });
         } catch { return []; }
     });
+    const [selectedCompanyIds, setSelectedCompanyIds] = useState<number[]>([]);
 
     const update = (id: number, field: string, val: string) =>
         setCompanies(cs => cs.map(c => c.id === id ? { ...c, [field]: val } : c));
@@ -1217,6 +1579,9 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
     // Persist companies & columns to localStorage on every change
     useEffect(() => { try { localStorage.setItem("custbuds_companies", JSON.stringify(companies)); } catch {} }, [companies]);
     useEffect(() => { try { localStorage.setItem("custbuds_company_cols", JSON.stringify(columns)); } catch {} }, [columns]);
+    useEffect(() => {
+        setSelectedCompanyIds(current => current.filter(id => companies.some(company => company.id === id)));
+    }, [companies]);
 
     useEffect(() => {
         const handler = (e: MouseEvent) => {
@@ -1270,6 +1635,64 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
     }, [safeCurrentPage, currentPage]);
 
     const paginatedData = sortedFiltered.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize);
+    const visibleCompanyIds = paginatedData.map(company => company.id);
+    const allVisibleCompaniesSelected = visibleCompanyIds.length > 0 && visibleCompanyIds.every(id => selectedCompanyIds.includes(id));
+    const someVisibleCompaniesSelected = visibleCompanyIds.some(id => selectedCompanyIds.includes(id)) && !allVisibleCompaniesSelected;
+
+    const toggleCompanySelection = (id: number) => {
+        setSelectedCompanyIds(current =>
+            current.includes(id)
+                ? current.filter(selectedId => selectedId !== id)
+                : [...current, id]
+        );
+    };
+
+    const toggleSelectAllCompanies = () => {
+        setSelectedCompanyIds(current =>
+            allVisibleCompaniesSelected
+                ? current.filter(id => !visibleCompanyIds.includes(id))
+                : Array.from(new Set([...current, ...visibleCompanyIds]))
+        );
+    };
+
+    const deleteSelectedCompanies = () => {
+        setCompanies(current => current.filter(company => !selectedCompanyIds.includes(company.id)));
+        setSelectedCompanyIds([]);
+    };
+
+    const handleProspectSelectedCompany = async () => {
+        if (!onAgentStart || !onAgentResult || selectedCompanyIds.length !== 1 || isProspectingSelected) return;
+        const selectedCompany = companies.find(company => company.id === selectedCompanyIds[0]);
+        if (!selectedCompany) return;
+
+        const companyName = selectedCompany["Company name"] || selectedCompany.name || "";
+        if (!companyName) return;
+
+        setIsProspectingSelected(true);
+        onAgentStart();
+
+        try {
+            const res = await fetch("http://localhost:5000/api/agent/prospect", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    companyName,
+                    city: selectedCompany["City"] || selectedCompany.city || "",
+                    companySize: selectedCompany["Company Size"] || selectedCompany.companySize || "",
+                    type: selectedCompany["Type"] || selectedCompany.type || "Prospect",
+                }),
+            });
+
+            if (!res.ok) throw new Error(`Prospecting failed with status ${res.status}`);
+
+            const data: AgentResult = await res.json();
+            onAgentResult({ ...data, companyName });
+        } catch {
+            onAgentResult(null);
+        } finally {
+            setIsProspectingSelected(false);
+        }
+    };
 
     return (
         <>
@@ -1332,6 +1755,31 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                         Table view <ChevronDownIcon />
                     </button>
                     <div className="flex items-center gap-1.5 ml-auto">
+                        {onAgentStart && onAgentResult && (
+                            <button
+                                onClick={handleProspectSelectedCompany}
+                                disabled={selectedCompanyIds.length !== 1 || isProspectingSelected}
+                                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                                    selectedCompanyIds.length === 1 && !isProspectingSelected
+                                        ? "bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100"
+                                        : "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
+                                }`}
+                            >
+                                {isProspectingSelected
+                                    ? "Prospecting..."
+                                    : selectedCompanyIds.length === 1
+                                    ? "Prospect selected"
+                                    : "Select one to prospect"}
+                            </button>
+                        )}
+                        {selectedCompanyIds.length > 0 && (
+                            <button
+                                onClick={deleteSelectedCompanies}
+                                className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 transition-colors"
+                            >
+                                Delete selected ({selectedCompanyIds.length})
+                            </button>
+                        )}
                         <div className="relative">
                             <button onClick={() => setShowSort(v => !v)} className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 bg-white shadow-sm flex items-center gap-1">
                                 Sort {sortRule.col && <span className="text-sky-600 font-bold ml-1">({sortRule.col})</span>}
@@ -1367,7 +1815,13 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                     <table style={{ minWidth: 'max-content', width: '100%' }} className="text-sm border-collapse">
                         <thead>
                             <tr className="bg-slate-50 border-b border-gray-200">
-                                <th className="w-8 px-2 py-2.5 border-r border-gray-200 bg-slate-50 sticky left-0 z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></th>
+                                <th className="w-8 px-2 py-2.5 border-r border-gray-200 bg-slate-50 sticky left-0 z-10">
+                                    <SelectAllCheckbox
+                                        checked={allVisibleCompaniesSelected}
+                                        indeterminate={someVisibleCompaniesSelected}
+                                        onChange={toggleSelectAllCompanies}
+                                    />
+                                </th>
                                 {columns.map(h => (
                                     <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap border-r border-gray-200">
                                         {h}
@@ -1379,7 +1833,14 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                         <tbody>
                             {paginatedData.map((company: any) => (
                                 <tr key={company.id} className="border-b border-gray-100 hover:bg-sky-50/20 transition-colors group">
-                                    <td className="w-8 px-2 py-3 border-r border-gray-200 bg-white group-hover:bg-sky-50/20 sticky left-0 text-center align-middle transition-colors z-10"><input type="checkbox" className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500" /></td>
+                                    <td className="w-8 px-2 py-3 border-r border-gray-200 bg-white group-hover:bg-sky-50/20 sticky left-0 text-center align-middle transition-colors z-10">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedCompanyIds.includes(company.id)}
+                                            onChange={() => toggleCompanySelection(company.id)}
+                                            className="w-3.5 h-3.5 rounded-sm border-gray-300 accent-sky-500"
+                                        />
+                                    </td>
                                     {columns.map((col, ci) => (
                                         <td key={col} className="px-3 py-3 border-r border-gray-200 relative">
                                             {ci === 0 ? (
@@ -1879,6 +2340,7 @@ function ProspectingAgentView({
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€ 2. Deal Intelligence Agent View â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResult[] }) {
     const [refreshTick, setRefreshTick] = useState(0);
+    const [modelIntel, setModelIntel] = useState<DealIntelModelResponse | null>(null);
 
     useEffect(() => {
         const intervalId = window.setInterval(() => setRefreshTick(tick => tick + 1), 15000);
@@ -1957,7 +2419,7 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
         };
     };
 
-    const intelligence = useMemo(() => {
+    const localIntelligence = useMemo(() => {
         const activeDeals = (readStoredRows(DEALS_STORAGE_KEY) as DealRecord[]).filter(deal => deal.status === "active");
         const meetings = readStoredRows("custbuds_meetings");
         const calls = readStoredRows("custbuds_calls");
@@ -2075,6 +2537,70 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
             } as DealIntelAlert))).slice(0, 5),
         };
     }, [agentResults, refreshTick]);
+
+    const modelPayload = useMemo(() => JSON.stringify({
+        deals: localIntelligence.deals.map(deal => ({
+            id: deal.id,
+            name: deal.name,
+            value: deal.value,
+            stage: deal.stage,
+            health: deal.health,
+            risk: deal.risk,
+            signals: deal.signals,
+            owner: deal.owner,
+            close: deal.close,
+            company: deal.company,
+            contact: deal.contact,
+            activityCount: deal.activityCount,
+            lastActivityLabel: deal.lastActivityLabel,
+            recovery: deal.recovery,
+        })),
+    }), [localIntelligence.deals]);
+
+    useEffect(() => {
+        if (localIntelligence.deals.length === 0) {
+            setModelIntel(null);
+            return;
+        }
+
+        let ignore = false;
+
+        const run = async () => {
+            try {
+                const res = await fetch("http://localhost:5000/api/agent/deal-intelligence", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: modelPayload,
+                });
+                if (!res.ok) throw new Error(`Deal intelligence failed with status ${res.status}`);
+                const data: DealIntelModelResponse = await res.json();
+                if (!ignore) setModelIntel(data);
+            } catch {
+                if (!ignore) setModelIntel(null);
+            }
+        };
+
+        run();
+
+        return () => {
+            ignore = true;
+        };
+    }, [localIntelligence.deals.length, modelPayload]);
+
+    const intelligence = useMemo(() => {
+        if (!modelIntel) return localIntelligence;
+
+        const monitorByDealId = new Map(modelIntel.monitor.map(entry => [entry.dealId, entry]));
+
+        return {
+            ...localIntelligence,
+            deals: localIntelligence.deals.map(deal => ({
+                ...deal,
+                recovery: monitorByDealId.get(deal.id) || deal.recovery,
+            })),
+            alerts: modelIntel.alerts.length > 0 ? modelIntel.alerts : localIntelligence.alerts,
+        };
+    }, [localIntelligence, modelIntel]);
 
     return (
         <div className="space-y-6">
@@ -2406,6 +2932,7 @@ function DealsTableSection({
     onAddDeal,
     selectedDealIds,
     toggleDealSelection,
+    toggleAllDealSelection,
     updateDeal,
 }: {
     title: string;
@@ -2418,6 +2945,7 @@ function DealsTableSection({
     onAddDeal: () => void;
     selectedDealIds: number[];
     toggleDealSelection: (id: number) => void;
+    toggleAllDealSelection: (ids: number[]) => void;
     updateDeal: (id: number, field: keyof DealRecord, value: string) => void;
 }) {
     const totalValue = deals.reduce((sum, deal) => sum + parseDealValue(deal.value), 0);
@@ -2427,6 +2955,9 @@ function DealsTableSection({
     const nextClose = deals
         .map(deal => deal.expectedClose)
         .find(value => value && value !== "TBD") || "TBD";
+    const visibleDealIds = deals.map(deal => deal.id);
+    const allVisibleDealsSelected = visibleDealIds.length > 0 && visibleDealIds.every(id => selectedDealIds.includes(id));
+    const someVisibleDealsSelected = visibleDealIds.some(id => selectedDealIds.includes(id)) && !allVisibleDealsSelected;
 
     return (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -2455,7 +2986,13 @@ function DealsTableSection({
                         <table className="min-w-[1120px] w-full text-sm border-collapse">
                             <thead>
                                 <tr className="bg-slate-50 border-b border-gray-200">
-                                    <th className="w-10 px-3 py-2.5 border-r border-gray-200" />
+                                    <th className="w-10 px-3 py-2.5 border-r border-gray-200">
+                                        <SelectAllCheckbox
+                                            checked={allVisibleDealsSelected}
+                                            indeterminate={someVisibleDealsSelected}
+                                            onChange={() => toggleAllDealSelection(visibleDealIds)}
+                                        />
+                                    </th>
                                     {["Deal", "Stage", "Owner", "Deal Value", "Contacts", "Companies", "Priority", "Deal length", "Expected Close"].map(header => (
                                         <th
                                             key={header}
@@ -2592,6 +3129,7 @@ function DealsTableSection({
 
 function DealsView() {
     const [tableSearch, setTableSearch] = useState("");
+    const [showImport, setShowImport] = useState(false);
     const [deals, setDeals] = useState<DealRecord[]>(() => {
         try {
             const stored = localStorage.getItem(DEALS_STORAGE_KEY);
@@ -2649,11 +3187,53 @@ function DealsView() {
         setSectionsOpen(current => ({ ...current, [status]: true }));
     };
 
+    const handleImportDeals = (importedRows: Record<string, string>[]) => {
+        const importedDeals = importedRows.map((row, index) => {
+            const rawStage = String(row["Stage"] || "New").trim();
+            const normalisedStage = rawStage.toLowerCase();
+            const importedStage =
+                normalisedStage === "closedwon" || normalisedStage === "closed won"
+                    ? "Won"
+                    : rawStage;
+            const inferredStatus = String(row["Status"] || importedStage).toLowerCase().includes("won") ? "won" : "active";
+            const importedValue = String(row["Deal Value"] || "--")
+                .trim()
+                .replace(/^[?�]\s*/, "Rs ");
+            return {
+                id: Date.now() + index,
+                name: row["Deal"] || "New Deal",
+                stage: importedStage,
+                owner: row["Owner"] || "Unassigned",
+                value: importedValue || "--",
+                contact: row["Contacts"] || "--",
+                account: row["Companies"] || "--",
+                priority: String(row["Priority"] || (inferredStatus === "won" ? "None" : "Medium")).trim(),
+                duration: row["Deal length"] || "0 days",
+                expectedClose: row["Expected Close"] || (inferredStatus === "won" ? "Closed" : "TBD"),
+                status: inferredStatus,
+            } as DealRecord;
+        });
+
+        setDeals(current => [
+            ...importedDeals.filter(deal => deal.status === "active"),
+            ...current,
+            ...importedDeals.filter(deal => deal.status === "won"),
+        ]);
+    };
+
     const toggleDealSelection = (id: number) => {
         setSelectedDealIds(current =>
             current.includes(id)
                 ? current.filter(selectedId => selectedId !== id)
                 : [...current, id]
+        );
+    };
+
+    const toggleAllDealSelection = (dealIds: number[]) => {
+        setSelectedDealIds(current =>
+            dealIds.length > 0 && dealIds.every(id => current.includes(id))
+                ? current.filter(id => !dealIds.includes(id))
+                : Array.from(new Set([...current, ...dealIds]))
         );
     };
 
@@ -2680,6 +3260,13 @@ function DealsView() {
 
     return (
         <div className="space-y-6">
+            {showImport && (
+                <ImportModal
+                    columns={["Deal", "Stage", "Owner", "Deal Value", "Contacts", "Companies", "Priority", "Deal length", "Expected Close", "Status"]}
+                    onClose={() => setShowImport(false)}
+                    onImport={handleImportDeals}
+                />
+            )}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div className="flex items-center gap-3">
@@ -2697,16 +3284,7 @@ function DealsView() {
                             <p className="text-xs text-gray-400">Grouped tables for open opportunities and closed-won deals, styled to match the CRM.</p>
                         </div>
                     </div>
-                    <button
-                        onClick={() => addDeal("active")}
-                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white hover:opacity-90 transition-opacity"
-                        style={{ background: "linear-gradient(135deg,#0ea5e9,#14b8a6)" }}
-                    >
-                        <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                            <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-                        </svg>
-                        Add deal
-                    </button>
+                    <AddOptionsMenu buttonLabel="Add deal" onCreate={() => addDeal("active")} onImport={() => setShowImport(true)} />
                 </div>
             </div>
 
@@ -2756,6 +3334,7 @@ function DealsView() {
                         onAddDeal={() => addDeal("active")}
                         selectedDealIds={selectedDealIds}
                         toggleDealSelection={toggleDealSelection}
+                        toggleAllDealSelection={toggleAllDealSelection}
                         updateDeal={updateDeal}
                     />
                     <DealsTableSection
@@ -2769,6 +3348,7 @@ function DealsView() {
                         onAddDeal={() => addDeal("won")}
                         selectedDealIds={selectedDealIds}
                         toggleDealSelection={toggleDealSelection}
+                        toggleAllDealSelection={toggleAllDealSelection}
                         updateDeal={updateDeal}
                     />
                 </div>
@@ -2795,6 +3375,7 @@ function ActivityTableView({
     emptyMessage: string;
 }) {
     const [tableSearch, setTableSearch] = useState("");
+    const [showImport, setShowImport] = useState(false);
     const [rows, setRows] = useState<TableRow[]>(() => {
         try {
             const stored = localStorage.getItem(storageKey);
@@ -2823,6 +3404,17 @@ function ActivityTableView({
         setRows(current => [createRow(), ...current]);
     };
 
+    const handleImport = (importedRows: Record<string, string>[]) => {
+        const nextRows = importedRows.map((row, index) => ({
+            id: Date.now() + index,
+            ...columns.reduce<Record<string, string>>((acc, column) => {
+                acc[column] = row[column] || "--";
+                return acc;
+            }, {}),
+        }));
+        setRows(current => [...nextRows, ...current]);
+    };
+
     const toggleRowSelection = (id: number) => {
         setSelectedRowIds(current =>
             current.includes(id)
@@ -2843,25 +3435,28 @@ function ActivityTableView({
             columns.some(column => String(row[column] || "").toLowerCase().includes(query))
         );
     }, [columns, rows, tableSearch]);
+    const visibleRowIds = filteredRows.map(row => row.id);
+    const allVisibleRowsSelected = visibleRowIds.length > 0 && visibleRowIds.every(id => selectedRowIds.includes(id));
+    const someVisibleRowsSelected = visibleRowIds.some(id => selectedRowIds.includes(id)) && !allVisibleRowsSelected;
+
+    const toggleSelectAllRows = () => {
+        setSelectedRowIds(current =>
+            allVisibleRowsSelected
+                ? current.filter(id => !visibleRowIds.includes(id))
+                : Array.from(new Set([...current, ...visibleRowIds]))
+        );
+    };
 
     return (
         <div className="space-y-6">
+            {showImport && <ImportModal columns={columns} onClose={() => setShowImport(false)} onImport={handleImport} />}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div>
                         <h1 className="text-lg font-bold text-gray-900">{title}</h1>
                         <p className="text-xs text-gray-400 mt-1">{description}</p>
                     </div>
-                    <button
-                        onClick={addRow}
-                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white hover:opacity-90 transition-opacity"
-                        style={{ background: "linear-gradient(135deg,#0ea5e9,#14b8a6)" }}
-                    >
-                        <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                            <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-                        </svg>
-                        {addLabel}
-                    </button>
+                    <AddOptionsMenu buttonLabel={addLabel} onCreate={addRow} onImport={() => setShowImport(true)} />
                 </div>
             </div>
 
@@ -2893,7 +3488,13 @@ function ActivityTableView({
                     <table className="min-w-[980px] w-full text-sm border-collapse">
                         <thead>
                             <tr className="bg-slate-50 border-b border-gray-200">
-                                <th className="w-10 px-3 py-2.5 border-r border-gray-200" />
+                                <th className="w-10 px-3 py-2.5 border-r border-gray-200">
+                                    <SelectAllCheckbox
+                                        checked={allVisibleRowsSelected}
+                                        indeterminate={someVisibleRowsSelected}
+                                        onChange={toggleSelectAllRows}
+                                    />
+                                </th>
                                 {columns.map(column => (
                                     <th
                                         key={column}

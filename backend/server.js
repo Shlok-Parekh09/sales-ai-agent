@@ -12,6 +12,12 @@ app.use(express.json());
 const groq = process.env.GROQ_API_KEY
   ? new Groq({ apiKey: process.env.GROQ_API_KEY })
   : null;
+const huggingFaceApiKey =
+  process.env.HUGGING_FACE_API_KEY || process.env.HF_TOKEN || "";
+const hfAlertsModel =
+  process.env.HF_ALERTS_MODEL || "meta-llama/Llama-3.1-8B-Instruct";
+const hfPipelineModel =
+  process.env.HF_PIPELINE_MODEL || "deepseek-ai/DeepSeek-R1:fastest";
 
 const mockPublicData = {
   zomato: {
@@ -82,6 +88,89 @@ function lookupCompany(companyName) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function normaliseTone(risk) {
+  if (risk === "High") return "danger";
+  if (risk === "Medium") return "info";
+  return "positive";
+}
+
+function normaliseIcon(risk) {
+  if (risk === "High") return "!";
+  if (risk === "Medium") return "i";
+  return "+";
+}
+
+function toArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeTrim(value) {
+  return String(value || "").trim();
+}
+
+function extractJsonObject(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {}
+
+  const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fencedMatch) {
+    try {
+      return JSON.parse(fencedMatch[1]);
+    } catch {}
+  }
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end > start) {
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {}
+  }
+
+  return null;
+}
+
+async function callHuggingFaceChat({
+  model,
+  systemPrompt,
+  userPrompt,
+  temperature = 0.3,
+  maxTokens = 900,
+}) {
+  if (!huggingFaceApiKey || typeof fetch !== "function") {
+    return null;
+  }
+
+  const response = await fetch("https://router.huggingface.co/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${huggingFaceApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      temperature,
+      max_tokens: maxTokens,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Hugging Face request failed (${response.status}): ${body.slice(0, 200)}`);
+  }
+
+  const payload = await response.json();
+  return payload?.choices?.[0]?.message?.content || "";
 }
 
 function buildPublicSignals(companyName, enriched) {
@@ -317,6 +406,231 @@ function normaliseAgentResult(raw, fallback, enriched) {
   };
 }
 
+function buildDealIntelFallback(deals) {
+  const normalisedDeals = toArray(deals).map((deal) => ({
+    id: Number(deal.id),
+    name: safeTrim(deal.name) || "Untitled deal",
+    risk: safeTrim(deal.risk) || "Low",
+    signals: toArray(deal.signals)
+      .map((signal) => safeTrim(signal))
+      .filter(Boolean)
+      .slice(0, 4),
+    lastActivityLabel: safeTrim(deal.lastActivityLabel) || "Just now",
+    recovery: deal.recovery && typeof deal.recovery === "object"
+      ? {
+          headline: safeTrim(deal.recovery.headline),
+          action: safeTrim(deal.recovery.action),
+          talkingPoints: toArray(deal.recovery.talkingPoints)
+            .map((point) => safeTrim(point))
+            .filter(Boolean)
+            .slice(0, 4),
+        }
+      : null,
+  }));
+
+  return {
+    generatedAt: new Date().toISOString(),
+    fallback: true,
+    alerts: normalisedDeals
+      .flatMap((deal) =>
+        deal.signals.slice(0, 2).map((signal) => ({
+          dealId: deal.id,
+          icon: normaliseIcon(deal.risk),
+          msg: `${deal.name}: ${signal}`,
+          time: deal.lastActivityLabel,
+          tone: normaliseTone(deal.risk),
+        }))
+      )
+      .slice(0, 6),
+    monitor: normalisedDeals
+      .filter((deal) => deal.recovery && deal.recovery.headline)
+      .slice(0, 8)
+      .map((deal) => ({
+        dealId: deal.id,
+        headline: deal.recovery.headline,
+        action: deal.recovery.action,
+        talkingPoints: deal.recovery.talkingPoints.length
+          ? deal.recovery.talkingPoints
+          : ["Reconfirm the next step, stakeholder owner, and decision blocker."],
+      })),
+  };
+}
+
+function normaliseDealIntelResponse(raw, fallback) {
+  const fallbackAlertsByDeal = new Map(
+    fallback.alerts.map((alert) => [alert.dealId, alert])
+  );
+  const fallbackMonitorByDeal = new Map(
+    fallback.monitor.map((entry) => [entry.dealId, entry])
+  );
+
+  const alerts = toArray(raw?.alerts)
+    .map((alert) => {
+      const dealId = Number(alert?.dealId);
+      const fallbackAlert = fallbackAlertsByDeal.get(dealId);
+      if (!Number.isFinite(dealId) || !fallbackAlert) return null;
+      return {
+        dealId,
+        icon: safeTrim(alert?.icon) || fallbackAlert.icon,
+        msg: safeTrim(alert?.msg) || fallbackAlert.msg,
+        time: safeTrim(alert?.time) || fallbackAlert.time,
+        tone: ["danger", "info", "positive"].includes(alert?.tone)
+          ? alert.tone
+          : fallbackAlert.tone,
+      };
+    })
+    .filter(Boolean);
+
+  const monitor = toArray(raw?.monitor)
+    .map((entry) => {
+      const dealId = Number(entry?.dealId);
+      const fallbackEntry = fallbackMonitorByDeal.get(dealId);
+      if (!Number.isFinite(dealId) || !fallbackEntry) return null;
+      const talkingPoints = toArray(entry?.talkingPoints)
+        .map((point) => safeTrim(point))
+        .filter(Boolean)
+        .slice(0, 4);
+
+      return {
+        dealId,
+        headline: safeTrim(entry?.headline) || fallbackEntry.headline,
+        action: safeTrim(entry?.action) || fallbackEntry.action,
+        talkingPoints: talkingPoints.length
+          ? talkingPoints
+          : fallbackEntry.talkingPoints,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    generatedAt: raw?.generatedAt || new Date().toISOString(),
+    fallback: false,
+    alerts: alerts.length ? alerts : fallback.alerts,
+    monitor: monitor.length ? monitor : fallback.monitor,
+  };
+}
+
+async function dealIntelligenceHandler(req, res) {
+  const deals = toArray(req.body?.deals).slice(0, 12);
+  const fallback = buildDealIntelFallback(deals);
+
+  if (!deals.length || !huggingFaceApiKey) {
+    return res.json(fallback);
+  }
+
+  const compactDeals = deals.map((deal) => ({
+    id: Number(deal.id),
+    name: safeTrim(deal.name),
+    stage: safeTrim(deal.stage),
+    risk: safeTrim(deal.risk),
+    health: Number(deal.health),
+    value: safeTrim(deal.value),
+    owner: safeTrim(deal.owner),
+    close: safeTrim(deal.close),
+    company: safeTrim(deal.company),
+    contact: safeTrim(deal.contact),
+    activityCount: Number(deal.activityCount || 0),
+    lastActivityLabel: safeTrim(deal.lastActivityLabel),
+    signals: toArray(deal.signals).map((signal) => safeTrim(signal)).filter(Boolean).slice(0, 4),
+    recovery: deal.recovery && typeof deal.recovery === "object"
+      ? {
+          headline: safeTrim(deal.recovery.headline),
+          action: safeTrim(deal.recovery.action),
+          talkingPoints: toArray(deal.recovery.talkingPoints)
+            .map((point) => safeTrim(point))
+            .filter(Boolean)
+            .slice(0, 4),
+        }
+      : null,
+  }));
+
+  const alertsPrompt = `Deals snapshot:
+${JSON.stringify(compactDeals, null, 2)}
+
+Write concise alert rows for the highest-priority risk signals.`;
+
+  const pipelinePrompt = `Deals snapshot:
+${JSON.stringify(compactDeals.filter((deal) => deal.recovery), null, 2)}
+
+Write recovery plays for the pipeline risk monitor using the existing risk and recovery context.`;
+
+  try {
+    const [alertsRaw, monitorRaw] = await Promise.all([
+      callHuggingFaceChat({
+        model: hfAlertsModel,
+        systemPrompt: `You write CRM alert text for a sales team.
+Return ONLY valid JSON with this schema:
+{
+  "alerts": [
+    {
+      "dealId": 0,
+      "icon": "!",
+      "msg": "Deal name: concise alert text",
+      "time": "Today",
+      "tone": "danger"
+    }
+  ]
+}
+
+Rules:
+- Keep each msg under 120 characters.
+- Use only tones "danger", "info", or "positive".
+- Use only the provided deal ids.
+- Focus on risk signals, not generic summaries.`,
+        userPrompt: alertsPrompt,
+        temperature: 0.25,
+        maxTokens: 700,
+      }),
+      callHuggingFaceChat({
+        model: hfPipelineModel,
+        systemPrompt: `You are a pipeline risk monitor copilot for a B2B sales team.
+Return ONLY valid JSON with this schema:
+{
+  "monitor": [
+    {
+      "dealId": 0,
+      "headline": "",
+      "action": "",
+      "talkingPoints": ["", "", ""]
+    }
+  ]
+}
+
+Rules:
+- Use only the provided deal ids.
+- Headline should be a short, concrete recovery angle.
+- Action should be one sentence.
+- talkingPoints should contain 2 to 4 specific seller talking points.
+- Preserve the risk context already present in the snapshot.`,
+        userPrompt: pipelinePrompt,
+        temperature: 0.35,
+        maxTokens: 1200,
+      }),
+    ]);
+
+    const parsedAlerts = extractJsonObject(alertsRaw) || {};
+    const parsedMonitor = extractJsonObject(monitorRaw) || {};
+
+    return res.json(
+      normaliseDealIntelResponse(
+        {
+          alerts: parsedAlerts.alerts,
+          monitor: parsedMonitor.monitor,
+          generatedAt: new Date().toISOString(),
+        },
+        fallback
+      )
+    );
+  } catch (err) {
+    console.error("Deal intelligence agent fallback:", err.message);
+    return res.json({
+      ...fallback,
+      fallback: true,
+      fallbackReason: err.message,
+    });
+  }
+}
+
 async function prospectHandler(req, res) {
   const { companyName, city, companySize, type, owner } = req.body;
 
@@ -419,6 +733,7 @@ Create a concise, high-signal output for a revenue team selling an AI-native CRM
 
 app.post("/api/agent/prospect", prospectHandler);
 app.post("/api/prospect", prospectHandler);
+app.post("/api/agent/deal-intelligence", dealIntelligenceHandler);
 
 app.listen(PORT, () => {
   console.log(`CustBuds Prospecting Agent running on http://localhost:${PORT}`);
