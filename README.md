@@ -80,7 +80,7 @@ Connect Gmail, Outlook, or a generic mailto provider from the Settings modal. St
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/your-org/AI_based_CRM.git
+git clone https://github.com/Shlok-Parekh09/AI_based_CRM.git
 cd AI_based_CRM
 ```
 
