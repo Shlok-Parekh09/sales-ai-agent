@@ -436,6 +436,7 @@ async function dealIntelligenceHandler(req, res) {
     contact: safeTrim(deal.contact),
     activityCount: Number(deal.activityCount || 0),
     lastActivityLabel: safeTrim(deal.lastActivityLabel),
+    activitySummary: safeTrim(deal.activitySummary),
     researchSummary: safeTrim(deal.researchSummary),
     companyFocus: safeTrim(deal.companyFocus),
   }));
@@ -443,12 +444,12 @@ async function dealIntelligenceHandler(req, res) {
   const alertsPrompt = `Deals snapshot:
 ${JSON.stringify(compactDeals, null, 2)}
 
-Write concise alert rows for the highest-priority risk signals you can justify from the supplied CRM fields, researchSummary, and companyFocus values. If researchSummary or companyFocus is empty, do not infer company priorities.`;
+Write concise alert rows for the highest-priority risk signals you can justify from the supplied CRM fields, activitySummary, researchSummary, and companyFocus values. If context fields are empty, do not infer missing facts.`;
 
   const pipelinePrompt = `Deals snapshot:
 ${JSON.stringify(compactDeals, null, 2)}
 
-Write recovery plays for the pipeline risk monitor using only the supplied CRM fields. Explain known context only when the snapshot includes it. Do not infer company research, priorities, metrics, competitors, contacts, or timelines that are not present.`;
+Write recovery plays for the pipeline risk monitor using only the supplied CRM fields and activitySummary. Explain known context only when the snapshot includes it. Do not infer company research, priorities, metrics, competitors, contacts, or timelines that are not present.`;
 
     try {
       const [alertsRaw, monitorRaw] = await Promise.all([
@@ -728,11 +729,21 @@ app.post("/api/agent/prospect", prospectHandler);
 app.post("/api/prospect", prospectHandler);
 app.post("/api/agent/deal-intelligence", dealIntelligenceHandler);
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`CustBuds Prospecting Agent running on http://localhost:${PORT}`);
   console.log(
     `API keys: GROQ_API_KEY=${groqApiKey ? "configured" : "missing"}, TAVILY_API_KEY=${
       tavilyApiKey ? "configured" : "missing"
     }, MISTRAL_API_KEY=${mistralApiKey ? "configured" : "missing"}`
   );
+});
+
+server.on("error", (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    console.error(
+      `Port ${PORT} is already in use. Stop the process using this port or set a different PORT in backend/.env.`
+    );
+    return;
+  }
+  console.error("Backend server failed to start:", err.message);
 });

@@ -97,6 +97,7 @@ type DealIntelRecord = {
     contact: string;
     activityCount: number;
     lastActivityLabel: string;
+    activitySummary?: string;
     recovery: DealIntelRecovery | null;
     researchSummary?: string;
     companyFocus?: string;
@@ -2635,6 +2636,11 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
             const activityText = relatedActivities
                 .map(row => [row["Meeting"], row["Call"], row["Status"], row["Next Step"], row["Company"], row["Contact"]].filter(Boolean).join(" "))
                 .join(" ");
+            const activitySummary = relatedActivities
+                .slice(0, 8)
+                .map(row => [row["Date"], row["Status"], row["Meeting"], row["Call"], row["Next Step"]].filter(Boolean).join(" · "))
+                .filter(Boolean)
+                .join(" | ");
 
             let health = 76;
             const signals: string[] = [];
@@ -2660,7 +2666,7 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
             }
 
             if (/cancel|no show|no-show|missed|no answer|voicemail|resched|stalled/i.test(activityText)) addSignal("engagement", "Recent activity status suggests friction or a stalled follow-up", 14);
-            if (/salesforce|hubspot|zoho|freshsales|pipedrive|competitor/i.test(activityText)) addSignal("competitive", "Competitor language detected in meeting or call notes", 16, true);
+            if (/competitor|alternate vendor|other crm|other solution/i.test(activityText)) addSignal("competitive", "Competitive pressure was mentioned in activity notes", 16, true);
             if (lateStage && relatedActivities.length < 2) addSignal("stakeholder", "Late-stage deal is under-threaded across stakeholders", 10);
             if (daysToClose !== null && daysToClose <= 10 && !lateStage) addSignal("timeline", "Close date is aggressive for the current stage", 12);
 
@@ -2684,6 +2690,7 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
                 contact: deal.contact,
                 activityCount: relatedActivities.length,
                 lastActivityLabel: formatRelativeDayLabel(lastActivity),
+                activitySummary,
                 recovery: null,
                 researchSummary: research?.researchSummary || "",
                 companyFocus: research?.publicSignals?.[0]?.detail || "",
@@ -2713,6 +2720,7 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
             contact: deal.contact,
             activityCount: deal.activityCount,
             lastActivityLabel: deal.lastActivityLabel,
+            activitySummary: (deal as any).activitySummary || "",
             researchSummary: deal.researchSummary,
             companyFocus: deal.companyFocus,
         })),
@@ -2930,18 +2938,6 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
 
 const DEALS_STORAGE_KEY = "custbuds_deals";
 const DEFAULT_DEALS: DealRecord[] = [];
-const LEGACY_SEEDED_DEAL_NAMES = [
-    "Web Design Retainer",
-    "Deal 1",
-    "Deal 2",
-    "Deal 3",
-    "Deal name 5",
-];
-
-const isLegacySeededDeals = (rows: DealRecord[]) =>
-    rows.length > 0 &&
-    rows.length <= LEGACY_SEEDED_DEAL_NAMES.length &&
-    rows.every(row => LEGACY_SEEDED_DEAL_NAMES.includes(row.name));
 
 const dealStageTone = (stage: string) => {
     const key = stage.toLowerCase();
@@ -3399,7 +3395,7 @@ function DealsView() {
             const stored = localStorage.getItem(DEALS_STORAGE_KEY);
             if (!stored) return DEFAULT_DEALS;
             const parsed = JSON.parse(stored) as DealRecord[];
-            return isLegacySeededDeals(parsed) ? [] : parsed;
+            return Array.isArray(parsed) ? parsed : DEFAULT_DEALS;
         } catch {
             return DEFAULT_DEALS;
         }
@@ -3869,6 +3865,95 @@ function PlaceholderView({ title, desc }: { title: string; desc: string }) {
 /* ─────────── Auth types ─────────── */
 type AuthUser = SellerContext & { name: string; email: string; color: string };
 
+/* ─────────── Opening Dashboard ─────────── */
+function OpeningDashboard({ onLoginClick }: { onLoginClick: () => void }) {
+    return (
+        <div className="min-h-screen bg-[#f7f8fb] text-gray-900">
+            <div className="max-w-6xl mx-auto px-5 pt-6 pb-14">
+                <header className="flex items-center justify-between mb-14">
+                    <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-sky-100 text-sky-600 flex items-center justify-center">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-5 h-5">
+                                <path d="M4 20V7.5A1.5 1.5 0 015.5 6H10l2 2h6.5A1.5 1.5 0 0120 9.5V20H4z" />
+                            </svg>
+                        </div>
+                        <span className="text-xl font-black tracking-tight">Cust<span className="text-sky-600">Buds</span></span>
+                    </div>
+                    <button
+                        onClick={onLoginClick}
+                        className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+                        style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
+                    >
+                        Login
+                    </button>
+                </header>
+
+                <section className="grid lg:grid-cols-2 gap-10 items-center">
+                    <div>
+                        <p className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-700 mb-4">
+                            AI-native CRM
+                        </p>
+                        <h1 className="text-4xl md:text-5xl font-black leading-tight tracking-tight">
+                            Customer Relationship
+                            <span className="block text-sky-600">Magic</span>
+                        </h1>
+                        <p className="mt-5 text-base text-gray-600 max-w-xl leading-relaxed">
+                            Track opportunities, forecast pipeline health, and close deals faster with one unified sales workspace.
+                        </p>
+                        <div className="mt-7 flex items-center gap-3">
+                            <button
+                                onClick={onLoginClick}
+                                className="px-6 py-3 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-opacity"
+                                style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
+                            >
+                                Start now
+                            </button>
+                            <button
+                                onClick={onLoginClick}
+                                className="px-6 py-3 rounded-xl text-sm font-semibold border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+                            >
+                                Meet an advisor
+                            </button>
+                        </div>
+                        <p className="mt-3 text-xs text-gray-500">Free workspace setup. Instant access.</p>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+                        <div className="text-xs uppercase tracking-wider text-gray-400 font-bold mb-3">Pipeline at a glance</div>
+                        <div className="space-y-3">
+                            {[
+                                ["Discovery", "₹12.4L", "bg-blue-100 text-blue-700"],
+                                ["Proposal Sent", "₹28.6L", "bg-amber-100 text-amber-700"],
+                                ["Negotiation", "₹43.2L", "bg-violet-100 text-violet-700"],
+                                ["Closing Soon", "₹17.8L", "bg-emerald-100 text-emerald-700"],
+                            ].map(([stage, value, tone]) => (
+                                <div key={String(stage)} className="flex items-center justify-between rounded-xl border border-gray-100 px-4 py-3">
+                                    <span className="text-sm font-semibold text-gray-800">{stage}</span>
+                                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${tone}`}>{value}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                <section className="mt-14 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {[
+                        ["Track opportunities", "Kanban-style pipeline with real-time revenue visibility."],
+                        ["Never miss follow-ups", "Meetings, calls, and sequences in one shared flow."],
+                        ["Unified communication", "Contacts, companies, and outreach context together."],
+                        ["Smart reporting", "Live health scores and AI-assisted recovery plays."],
+                    ].map(([title, text]) => (
+                        <div key={String(title)} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+                            <h3 className="text-sm font-bold text-gray-900">{title}</h3>
+                            <p className="mt-2 text-xs text-gray-600 leading-relaxed">{text}</p>
+                        </div>
+                    ))}
+                </section>
+            </div>
+        </div>
+    );
+}
+
 /* ─────────── Login Screen ─────────── */
 function LoginScreen({ onLogin, initialUser }: { onLogin: (user: AuthUser) => void; initialUser?: Partial<AuthUser> | null }) {
     const [name, setName] = useState(initialUser?.name || "");
@@ -4002,8 +4087,9 @@ export default function CRMDashboard() {
         try { const s = localStorage.getItem("custbuds_user"); return s ? JSON.parse(s) : null; }
         catch { return null; }
     });
+    const [showOpeningDashboard, setShowOpeningDashboard] = useState(true);
     const handleLogin = (user: AuthUser) => setCurrentUser(user);
-    const handleSignOut = () => { localStorage.clear(); setCurrentUser(null); };
+    const handleSignOut = () => { localStorage.clear(); setCurrentUser(null); setShowOpeningDashboard(true); };
 
     // All state/ref/effect hooks MUST be declared unconditionally before any return
     const [searchValue, setSearchValue] = useState("");
@@ -4041,12 +4127,20 @@ export default function CRMDashboard() {
         } catch {}
     }, [emailProvider]);
 
+    const hasWorkspaceProfile = Boolean(
+        currentUser && currentUser.companyName && currentUser.companyDescription && currentUser.outreachGoal
+    );
+
     // ── Early return AFTER all hooks ──
-    if (!currentUser || !currentUser.companyName || !currentUser.companyDescription || !currentUser.outreachGoal) {
+    if (showOpeningDashboard) {
+        return <OpeningDashboard onLoginClick={() => setShowOpeningDashboard(false)} />;
+    }
+
+    if (!hasWorkspaceProfile) {
         return <LoginScreen onLogin={handleLogin} initialUser={currentUser} />;
     }
 
-    const activeAccount = currentUser;
+    const activeAccount = currentUser as AuthUser;
     const sellerContext: SellerContext = {
         companyName: activeAccount.companyName,
         companyWebsite: activeAccount.companyWebsite || "",
