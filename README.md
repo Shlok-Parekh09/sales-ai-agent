@@ -85,6 +85,7 @@ A sample database used for testing and validation is included with this reposito
 
 - Node.js 18+
 - A [Groq API key](https://console.groq.com) for the Prospecting Agent
+- A [Tavily API key](https://tavily.com) for source-backed company research
 - A [Mistral API key](https://console.mistral.ai) for the Deal Intelligence Agent
 
 ### 1. Clone the repo
@@ -105,6 +106,7 @@ Create a `.env` file in the `backend/` directory:
 
 ```env
 GROQ_API_KEY=your_groq_key_here
+TAVILY_API_KEY=your_tavily_key_here
 MISTRAL_API_KEY=your_mistral_key_here
 PORT=5000
 ```

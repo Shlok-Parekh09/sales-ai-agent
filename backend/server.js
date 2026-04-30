@@ -10,16 +10,30 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-const groq = process.env.GROQ_API_KEY
-  ? new Groq({ apiKey: process.env.GROQ_API_KEY })
+function envValue(name) {
+  return String(process.env[name] || "").trim();
+}
+
+const groqApiKey = envValue("GROQ_API_KEY");
+const groq = groqApiKey
+  ? new Groq({ apiKey: groqApiKey })
   : null;
-const mistralApiKey = process.env.MISTRAL_API_KEY || "";
+const mistralApiKey = envValue("MISTRAL_API_KEY");
+const tavilyApiKey = envValue("TAVILY_API_KEY");
 const mistralAlertsModel =
   process.env.MISTRAL_ALERTS_MODEL || "mistral-small-latest";
 const mistralPipelineModel =
   process.env.MISTRAL_PIPELINE_MODEL || "mistral-medium-latest";
 let mistralAuthBlockedReason = "";
 let mistralAuthBlockedLogged = false;
+
+const FIT_SCORE_RUBRIC = [
+  { label: "ICP alignment", weight: 0.25 },
+  { label: "Business trigger urgency", weight: 0.2 },
+  { label: "Revenue workflow pain", weight: 0.25 },
+  { label: "Buying committee clarity", weight: 0.15 },
+  { label: "Evidence quality", weight: 0.15 },
+];
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -144,6 +158,60 @@ async function callMistralChat({
   return extractMistralMessageText(payload?.choices?.[0]?.message?.content);
 }
 
+async function fetchCompanyResearch(context) {
+  if (!tavilyApiKey) {
+    return {
+      available: false,
+      reason: "Detailed company research requires TAVILY_API_KEY in backend/.env.",
+      answer: "",
+      sources: [],
+    };
+  }
+
+  const queryParts = [
+    context.company_name,
+    context.city,
+    context.type,
+    "company overview recent news growth sales revenue operations CRM",
+  ].filter(Boolean);
+
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: tavilyApiKey,
+      query: queryParts.join(" "),
+      search_depth: "advanced",
+      include_answer: true,
+      include_raw_content: false,
+      max_results: 8,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Research request failed (${response.status}): ${body.slice(0, 200)}`);
+  }
+
+  const payload = await response.json();
+  const sources = toArray(payload?.results)
+    .map((result) => ({
+      title: safeTrim(result?.title),
+      url: safeTrim(result?.url),
+      content: safeTrim(result?.content).slice(0, 900),
+      score: Number(result?.score || 0),
+    }))
+    .filter((source) => source.title && source.url && source.content)
+    .slice(0, 8);
+
+  return {
+    available: sources.length > 0,
+    reason: sources.length > 0 ? "" : "No reliable research sources were returned.",
+    answer: safeTrim(payload?.answer),
+    sources,
+  };
+}
+
 function buildProspectingFallback({
   context,
 }) {
@@ -162,11 +230,59 @@ function buildProspectingFallback({
     nextActions: [],
     generatedAt: new Date().toISOString(),
     fallback: true,
+    researchAvailable: false,
     enrichedProfile: context,
   };
 }
 
-function normaliseAgentResult(raw, fallback, enriched) {
+function normaliseFitBreakdown(value) {
+  const items = Array.isArray(value) ? value : [];
+  return FIT_SCORE_RUBRIC.map((rubricItem, index) => {
+    const rawItem =
+      items.find((item) => safeTrim(item?.label).toLowerCase() === rubricItem.label.toLowerCase()) ||
+      items[index] ||
+      {};
+
+    return {
+      label: rubricItem.label,
+      score: clamp(Number(rawItem.score || 0), 0, 100),
+      summary: safeTrim(rawItem.summary),
+    };
+  });
+}
+
+function calculateFitScore(fitBreakdown, researchAvailable) {
+  if (!researchAvailable) return 0;
+
+  const weightedScore = FIT_SCORE_RUBRIC.reduce((sum, rubricItem) => {
+    const item = fitBreakdown.find(
+      (breakdownItem) => breakdownItem.label.toLowerCase() === rubricItem.label.toLowerCase()
+    );
+    return sum + (item ? item.score * rubricItem.weight : 0);
+  }, 0);
+
+  const evidenceQuality =
+    fitBreakdown.find((item) => item.label === "Evidence quality")?.score || 0;
+  const cappedScore = evidenceQuality < 40 ? Math.min(weightedScore, 55) : weightedScore;
+
+  return clamp(Math.round(cappedScore), 0, 100);
+}
+
+function normaliseAgentResult(raw, fallback, enriched, research) {
+  const publicSignals =
+    Array.isArray(raw.publicSignals) && raw.publicSignals.length
+      ? raw.publicSignals
+          .map((signal) => ({
+            label: safeTrim(signal?.label),
+            detail: safeTrim(signal?.detail),
+            source: safeTrim(signal?.source),
+            impact: safeTrim(signal?.impact),
+          }))
+          .filter((signal) => signal.label && signal.detail)
+          .slice(0, 8)
+      : fallback.publicSignals;
+  const fitBreakdown = normaliseFitBreakdown(raw.fitBreakdown);
+
   return {
     ...fallback,
     ...raw,
@@ -174,17 +290,9 @@ function normaliseAgentResult(raw, fallback, enriched) {
     email2: raw.email2 || fallback.email2,
     researchSummary: raw.researchSummary || fallback.researchSummary,
     scoreReasoning: raw.scoreReasoning || fallback.scoreReasoning,
-    fitScore: clamp(Number(raw.fitScore || fallback.fitScore), 0, 100),
-    publicSignals: Array.isArray(raw.publicSignals) && raw.publicSignals.length
-      ? raw.publicSignals
-      : fallback.publicSignals,
-    fitBreakdown: Array.isArray(raw.fitBreakdown) && raw.fitBreakdown.length
-      ? raw.fitBreakdown.map((item) => ({
-          label: item.label || "Signal",
-          score: clamp(Number(item.score || 0), 0, 100),
-          summary: item.summary || "",
-        }))
-      : fallback.fitBreakdown,
+    fitScore: calculateFitScore(fitBreakdown, Boolean(research?.available)),
+    publicSignals,
+    fitBreakdown,
     buyerPersonas: Array.isArray(raw.buyerPersonas) && raw.buyerPersonas.length
       ? raw.buyerPersonas
       : fallback.buyerPersonas,
@@ -201,6 +309,11 @@ function normaliseAgentResult(raw, fallback, enriched) {
       : fallback.nextActions,
     generatedAt: raw.generatedAt || new Date().toISOString(),
     fallback: false,
+    researchAvailable: Boolean(research?.available),
+    researchSources: toArray(research?.sources).map((source) => ({
+      title: source.title,
+      url: source.url,
+    })),
     enrichedProfile: enriched,
   };
 }
@@ -379,7 +492,7 @@ Rules:
 - talkingPoints should contain 2 to 4 specific seller talking points.
 - Base every recommendation on the CRM context present in the snapshot.
 - researchDetails.currentFocus must summarize only verified context from researchSummary or companyFocus. Leave it empty when no verified context is supplied.
-- researchDetails.problem must explain only a risk or gap that appears in the supplied signals.
+- researchDetails.problem must explain only a risk or gap that appears in the supplied CRM fields.
 - researchDetails.helpAngle must say how CustBuds can help in practical business terms without unsupported claims.
 - Do not mention tech stacks, frameworks, engineering tooling, fabricated research, metrics, contacts, or hardcoded values.`,
         userPrompt: pipelinePrompt,
@@ -438,22 +551,46 @@ async function prospectHandler(req, res) {
     return res.json(fallback);
   }
 
+  let research;
+  try {
+    research = await fetchCompanyResearch(context);
+  } catch (err) {
+    return res.json({
+      ...fallback,
+      researchSummary: "Detailed research could not be completed. Verify the research API key and try again.",
+      fallbackReason: err.message,
+    });
+  }
+
+  if (!research.available) {
+    return res.json({
+      ...fallback,
+      researchSummary: research.reason,
+      fallbackReason: research.reason,
+    });
+  }
+
   const systemPrompt = `You are a B2B sales prospecting agent for CustBuds CRM.
 Your job is to:
-1. Use only the supplied CRM inputs.
-2. Score fit for CustBuds from 0-100 only when the inputs are sufficient.
-3. Write personalized outreach that is based only on the supplied inputs.
-4. Create adaptive messaging adjustments based only on the supplied inputs.
-5. Summarize what is known, what is unknown, and how CustBuds may help.
+1. Produce a detailed, source-backed company research brief.
+2. Score fit for CustBuds using the required rubric.
+3. Write personalized outreach based on the supplied CRM inputs and research sources.
+4. Create adaptive messaging adjustments based on the supplied CRM inputs and research sources.
+5. Summarize verified company priorities, likely sales workflow problems, and how CustBuds can help.
 
 Return ONLY valid JSON.
 
 Quality rules:
 - Write in polished, professional English with correct grammar.
+- Use only the supplied CRM inputs and research sources.
 - Do not invent research, contacts, company news, headcount, market facts, metrics, funding, technology, or activity history.
 - Do not use placeholder or hardcoded values.
 - If a field cannot be supported by the supplied inputs, leave it empty or explain that the information is unavailable.
 - Avoid casual phrasing, hype, and unsupported claims.
+- Every publicSignals item must include a source title or source URL from the supplied research sources.
+- fitBreakdown must use exactly these five labels in this order: ICP alignment, Business trigger urgency, Revenue workflow pain, Buying committee clarity, Evidence quality.
+- Score each fitBreakdown category conservatively. Penalize missing evidence.
+- The server will calculate final fitScore from fitBreakdown; still return your best fitScore estimate.
 
 JSON schema:
 {
@@ -487,17 +624,37 @@ Company size: ${companySize || ""}
 Type: ${type || ""}
 Known contact or owner: ${context.key_contact?.name || ""}
 
-Create a concise, high-signal output for a revenue team selling an AI-native CRM that improves target research, fit scoring, outreach personalization, and deal-risk visibility.
+Research answer:
+${research.answer || ""}
+
+Research sources:
+${research.sources
+  .map(
+    (source, index) =>
+      `${index + 1}. ${source.title}
+URL: ${source.url}
+Excerpt: ${source.content}`
+  )
+  .join("\n\n")}
+
+Create a detailed, high-signal output for a revenue team selling an AI-native CRM that improves target research, fit scoring, outreach personalization, and deal-risk visibility.
 
 Important:
 - Do not mention tech stacks, frameworks, or tooling.
-- Do not describe these inputs as public research.
-- Do not create publicSignals unless the signal is directly supported by the fields above.
+- Do not create publicSignals unless the signal is directly supported by the research sources above.
 - Do not include fabricated values, generic market assumptions, or guessed company initiatives.
 - In researchSummary, clearly include:
-  1. what is known from the supplied CRM inputs,
-  2. what remains unknown because no verified research was provided,
-  3. how CustBuds may help in business terms without claiming unverified facts.`;
+  1. a concise company overview,
+  2. recent priorities or business developments supported by sources,
+  3. likely sales, pipeline, or go-to-market workflow pressures supported by evidence,
+  4. the most relevant CustBuds positioning angle,
+  5. uncertainties or gaps that should be verified before outreach.
+- Fit score rubric:
+  - ICP alignment: company size, segment, and operating complexity fit for CustBuds.
+  - Business trigger urgency: recent changes that make action timely.
+  - Revenue workflow pain: evidence of prospecting, pipeline, sales, partner, or growth execution pressure.
+  - Buying committee clarity: whether the likely buyer function is identifiable from the inputs or sources.
+  - Evidence quality: source quality, specificity, recency, and amount of corroboration.`;
 
   try {
     const completion = await groq.chat.completions.create({
@@ -512,7 +669,7 @@ Important:
 
     const raw = completion.choices[0].message.content || "{}";
     const parsed = JSON.parse(raw);
-    const result = normaliseAgentResult(parsed, fallback, context);
+    const result = normaliseAgentResult(parsed, fallback, context, research);
     if (email) result.targetEmail = email;
     return res.json(result);
   } catch (err) {
