@@ -1,46 +1,61 @@
 import React, { useId } from "react";
 
 export function CustBudsLogoIcon({ className = "w-9 h-9" }: { className?: string }) {
-    const reactId = useId().replace(/:/g, "");
-    const badgeGradientId = `custbuds-badge-${reactId}`;
-    const linkGradientId = `custbuds-link-${reactId}`;
+    const id = useId().replace(/:/g, "");
 
     return (
         <svg viewBox="0 0 64 64" className={className} fill="none" aria-hidden="true">
             <defs>
-                <linearGradient id={badgeGradientId} x1="10" y1="8" x2="54" y2="58" gradientUnits="userSpaceOnUse">
-                    <stop offset="0" stopColor="#0f172a" />
-                    <stop offset="0.52" stopColor="#0284c7" />
-                    <stop offset="1" stopColor="#14b8a6" />
+                {/* Badge background */}
+                <linearGradient id={`bg-${id}`} x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stopColor="#0f172a" />
+                    <stop offset="55%" stopColor="#0369a1" />
+                    <stop offset="100%" stopColor="#0d9488" />
                 </linearGradient>
-                <linearGradient id={linkGradientId} x1="20" y1="38" x2="49" y2="38" gradientUnits="userSpaceOnUse">
-                    <stop offset="0" stopColor="#0ea5e9" />
-                    <stop offset="1" stopColor="#14b8a6" />
+                {/* Front person */}
+                <linearGradient id={`p1-${id}`} x1="30" y1="18" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stopColor="#38bdf8" />
+                    <stop offset="100%" stopColor="#0ea5e9" />
+                </linearGradient>
+                {/* Back person */}
+                <linearGradient id={`p2-${id}`} x1="10" y1="18" x2="40" y2="58" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stopColor="#5eead4" />
+                    <stop offset="100%" stopColor="#14b8a6" />
                 </linearGradient>
             </defs>
-            <rect x="4" y="4" width="56" height="56" rx="18" fill={`url(#${badgeGradientId})`} />
+
+            {/* Rounded square badge */}
+            <rect x="2" y="2" width="60" height="60" rx="18" fill={`url(#bg-${id})`} />
+
+            {/* ── Back person (left, slightly behind) ── */}
+            {/* Head */}
+            <circle cx="24" cy="22" r="8.5" fill={`url(#p2-${id})`} />
+            {/* Body / torso arc */}
             <path
-                d="M18 19C18 14.6 21.6 11 26 11H38C44.6 11 50 16.4 50 23V29C50 35.6 44.6 41 38 41H29L20 49V41H18C13.6 41 10 37.4 10 33V19C10 14.6 13.6 11 18 11Z"
-                fill="white"
-                fillOpacity="0.97"
+                d="M8 52 C8 40 14 35 24 35 C30 35 34 37.5 36.5 42"
+                fill={`url(#p2-${id})`}
+                opacity="0.85"
+                stroke="none"
             />
-            <circle cx="25.5" cy="23.5" r="4.75" fill="#0ea5e9" />
-            <circle cx="38.5" cy="23.5" r="4.75" fill="#14b8a6" />
+            {/* Shoulder fill to make it a proper solid silhouette */}
             <path
-                d="M20.5 38C21.9 33.8 25.2 31.5 29.2 31.5C32.7 31.5 35.4 32.8 37.2 35.6C39 32.8 41.7 31.5 45.1 31.5C49 31.5 52.2 33.8 53.5 38"
-                stroke={`url(#${linkGradientId})`}
-                strokeWidth="3.4"
-                strokeLinecap="round"
+                d="M8 54 L8 42 C8 38 14 34 24 34 C31 34 35.5 37 37.5 43 L37.5 54 Z"
+                fill={`url(#p2-${id})`}
+                opacity="0.7"
             />
+
+            {/* ── Front person (right, on top) ── */}
+            {/* Head */}
+            <circle cx="38" cy="24" r="9" fill={`url(#p1-${id})`} />
+            {/* Body silhouette */}
             <path
-                d="M28.3 24.7C29.9 24.7 31.3 25.3 32.6 26.6C33.9 25.3 35.4 24.7 37 24.7"
-                stroke="#0f172a"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                opacity="0.34"
+                d="M20 58 L20 47 C20 40 26 35.5 38 35.5 C50 35.5 56 40 56 47 L56 58 Z"
+                fill={`url(#p1-${id})`}
             />
-            <circle cx="46.5" cy="17" r="3.5" fill="#f97316" />
-            <path d="M46.5 14.4V19.6M43.9 17H49.1" stroke="white" strokeWidth="1.6" strokeLinecap="round" />
+
+            {/* White highlight dots on heads for depth */}
+            <circle cx="21" cy="19" r="2.5" fill="white" opacity="0.25" />
+            <circle cx="35" cy="21" r="2.8" fill="white" opacity="0.22" />
         </svg>
     );
 }

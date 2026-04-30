@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 
 // â”€â”€ TableRow type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import { CustBudsLogoLockup } from "./components/CustBudsLogo";
@@ -48,14 +48,14 @@ type AgentResult = {
     generatedAt?: string;
     fallback?: boolean;
     enrichedProfile?: {
-        recent_news: string;
-        tech_stack: string[];
-        key_contact: { name: string; title: string };
-        pain_points: string[];
-        industry: string;
-        headcount_range: string;
+        company_name?: string;
+        city?: string;
+        company_size?: string;
+        type?: string;
+        key_contact?: { name?: string; title?: string };
     };
     companyName: string; // added by the frontend before storing
+    targetEmail?: string; // echoed back from backend when email was provided
 };
 
 type DealRecord = {
@@ -182,6 +182,7 @@ function AgentResultPanel({
     onRegenerate,
     onStartSequence,
     onScheduleSequence,
+    recipientEmail,
 }: {
     result: AgentResult;
     onClose: () => void;
@@ -190,6 +191,7 @@ function AgentResultPanel({
     onRegenerate: (result: AgentResult) => Promise<string>;
     onStartSequence: (result: AgentResult, emailKey: "email1" | "email2") => Promise<string>;
     onScheduleSequence: (result: AgentResult, emailKey: "email1" | "email2", scheduledFor: string) => Promise<string>;
+    recipientEmail?: string;
 }) {
     const [activeEmail, setActiveEmail] = useState<"email1" | "email2">("email1");
     const [copied, setCopied] = useState(false);
@@ -292,8 +294,18 @@ function AgentResultPanel({
 
                 {result.enrichedProfile && (
                     <div className="flex flex-wrap gap-2">
-                        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Industry: {result.enrichedProfile.industry}</span>
-                        <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Contact: {result.enrichedProfile.key_contact.name} - {result.enrichedProfile.key_contact.title}</span>
+                        {result.enrichedProfile.city && (
+                            <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">City: {result.enrichedProfile.city}</span>
+                        )}
+                        {result.enrichedProfile.company_size && (
+                            <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Company size: {result.enrichedProfile.company_size}</span>
+                        )}
+                        {result.enrichedProfile.type && (
+                            <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Type: {result.enrichedProfile.type}</span>
+                        )}
+                        {result.enrichedProfile.key_contact?.name && (
+                            <span className="px-2.5 py-1 bg-sky-50 text-sky-700 text-xs rounded-full font-medium">Known contact: {result.enrichedProfile.key_contact.name}</span>
+                        )}
                     </div>
                 )}
 
@@ -318,6 +330,7 @@ function AgentResultPanel({
                     </div>
 
                     <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3">
+                        <div className="text-sm text-gray-500 mb-1 font-medium">To: {recipientEmail || "Not found in Companies tab"}</div>
                         <div className="font-semibold text-sm text-gray-800">{subject}</div>
                         <div className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{body}</div>
                     </div>
@@ -338,14 +351,16 @@ function AgentResultPanel({
                 )}
 
                 <div className="flex gap-2 pt-1">
-                    <button
-                        className="px-4 py-2 text-sm font-semibold text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-60"
-                        style={{ background: "#0ea5e9" }}
-                        disabled={isStartingSequence}
-                        onClick={handleStartSequenceClick}
-                    >
-                        {isStartingSequence ? "Opening..." : "Start Sequence"}
-                    </button>
+                    {emailProvider?.provider === "Gmail" && (
+                        <button
+                            className="px-4 py-2 text-sm font-semibold text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-60"
+                            style={{ background: "#0ea5e9" }}
+                            disabled={isStartingSequence}
+                            onClick={handleStartSequenceClick}
+                        >
+                            {isStartingSequence ? "Sending directly via Gmail..." : "Send directly via Gmail"}
+                        </button>
+                    )}
                     <button
                         className="px-4 py-2 text-sm font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 transition-colors disabled:opacity-60"
                         disabled={isRegenerating}
@@ -843,6 +858,7 @@ function CreateCompanyModal({ onClose, onSave, onAgentStart, onAgentResult }: {
                                             city: form.city,
                                             companySize: form.companySize,
                                             type: form.type,
+                                            email: form.email || "",
                                         }),
                                     });
                                     if (!res.ok) throw new Error(await res.text());
@@ -2189,10 +2205,14 @@ function SectionHeader({ title, description, action }: { title: string; descript
 function ProspectingAgentView({
     agentResults = [],
     onProspectAll,
+    onDeleteResult,
+    onClearHistory,
     isProspecting = false,
 }: {
     agentResults?: AgentResult[];
     onProspectAll?: () => void;
+    onDeleteResult?: (idx: number) => void;
+    onClearHistory?: () => void;
     isProspecting?: boolean;
 }) {
     const [selectedTarget, setSelectedTarget] = useState<number | null>(null);
@@ -2235,12 +2255,31 @@ function ProspectingAgentView({
         return items;
     }).slice(0, 12);
 
+    const lookupEmailForResult = (t: AgentResult): string => {
+        if (t.targetEmail && t.targetEmail.includes('@')) return t.targetEmail;
+        const normKey = normaliseLookupKey(t.companyName);
+        try {
+            const companies = JSON.parse(localStorage.getItem('custbuds_companies') || '[]') as any[];
+            const match = companies.find(c => normaliseLookupKey(c['Company name'] || c.name || '') === normKey);
+            if (match && match['Email ID'] && String(match['Email ID']).includes('@')) return String(match['Email ID']);
+            if (match && match.email && String(match.email).includes('@')) return String(match.email);
+        } catch {}
+        try {
+            const contacts = JSON.parse(localStorage.getItem('custbuds_contacts') || '[]') as any[];
+            const cName = normaliseLookupKey(t.enrichedProfile?.key_contact?.name || '');
+            const match = contacts.find(c => normaliseLookupKey(c['Name'] || c.name || '') === cName);
+            if (match && match['Email'] && String(match['Email']).includes('@')) return String(match['Email']);
+            if (match && match.email && String(match.email).includes('@')) return String(match.email);
+        } catch {}
+        return '';
+    };
+
     const openTarget = (idx: number) => {
         const t = agentResults[idx];
         setEmailTab('email1');
         setEditedEmail1(t.email1 || '');
         setEditedEmail2(t.email2 || '');
-        setForwardTo('');
+        setForwardTo(lookupEmailForResult(t));
         setForwarded(false);
         setSelectedTarget(selectedTarget === idx ? null : idx);
     };
@@ -2249,7 +2288,7 @@ function ProspectingAgentView({
         if (!forwardTo.trim()) return;
         const subject = encodeURIComponent(`Outreach from CustBuds`);
         const body = encodeURIComponent(emailBody);
-        window.open(`mailto:${forwardTo.trim()}?subject=${subject}&body=${body}`, '_blank');
+        window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(forwardTo.trim())}&su=${subject}&body=${body}`, '_blank');
         setForwarded(true);
     };
 
@@ -2267,8 +2306,17 @@ function ProspectingAgentView({
                             <p className="text-xs text-gray-400 max-w-3xl">Prospecting agents — that research targets across public data sources, score fit, write personalized outreach sequences, and adjust messaging based on engagement signals — without manual intervention.</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                         <AgentStatusBadge status={isProspecting ? "running" : "idle"} />
+                        {agentResults.length > 0 && onClearHistory && (
+                            <button
+                                onClick={() => { if (window.confirm('Clear all prospecting history?')) onClearHistory(); }}
+                                className="px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors flex items-center gap-1.5"
+                            >
+                                <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
+                                Clear History
+                            </button>
+                        )}
                         {onProspectAll && (
                             <button
                                 onClick={onProspectAll}
@@ -2313,7 +2361,7 @@ function ProspectingAgentView({
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b border-gray-100">
-                                    {["Prospect", "Company", "Fit Score", "Status", "Stage"].map(h => (
+                                    {["Prospect", "Company", "Fit Score", "Status", "Stage", ""].map(h => (
                                         <th key={h} className="py-2.5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide pr-4">{h}</th>
                                     ))}
                                 </tr>
@@ -2353,11 +2401,22 @@ function ProspectingAgentView({
                                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-sky-100 text-sky-700">Processed</span>
                                                 </td>
                                                 <td className="py-3 pr-4 text-xs text-slate-500">Sequence Ready</td>
+                                                <td className="py-3" onClick={e => e.stopPropagation()}>
+                                                    {onDeleteResult && (
+                                                        <button
+                                                            onClick={() => { if (selectedTarget === idx) setSelectedTarget(null); onDeleteResult(idx); }}
+                                                            className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                                            title="Delete from history"
+                                                        >
+                                                            <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
+                                                        </button>
+                                                    )}
+                                                </td>
                                             </tr>
 
                                             {isSelected && (
                                                 <tr>
-                                                    <td colSpan={5} className="bg-sky-50/30 p-0 border-b border-gray-100">
+                                                    <td colSpan={6} className="bg-sky-50/30 p-0 border-b border-gray-100">
                                                         <div className="p-4 mx-6 my-2 bg-white rounded-xl shadow-sm border border-sky-100">
                                                             <div className="flex items-center justify-between mb-3 border-b border-gray-100 pb-2">
                                                                 <span className="text-xs font-bold text-gray-800 uppercase tracking-wide">AI Outreach Sequence - {contactName.split(" ")[0]}</span>
@@ -2514,70 +2573,6 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
     const healthColor = (health: number) => health >= 75 ? "#22c55e" : health >= 50 ? "#f59e0b" : "#ef4444";
     const riskBg = (risk: string) => risk === "High" ? "bg-red-50 text-red-700" : risk === "Medium" ? "bg-amber-50 text-amber-700" : "bg-green-50 text-green-700";
 
-    const recoveryForDeal = (categories: Set<string>, deal: DealRecord, research?: AgentResult) => {
-        if (categories.size === 0) return null;
-        const companyLabel = hasMeaningfulValue(deal.account) ? deal.account : deal.name;
-        const proofPoint = research?.publicSignals?.[0]?.detail || research?.researchSummary || `${companyLabel}'s growth priorities`;
-
-        if (categories.has("competitive")) {
-            return {
-                headline: "Reframe differentiation before the comparison hardens",
-                action: "Share a short battlecard and ask which competitor claim needs to be answered.",
-                talkingPoints: [
-                    "Lead with why an AI-native CRM changes seller workflow, not just reporting.",
-                    `Reference ${proofPoint}.`,
-                    "Ask which evaluation criterion matters most before the next call.",
-                ],
-            };
-        }
-
-        if (categories.has("engagement")) {
-            return {
-                headline: "Reset momentum with a sharper business hypothesis",
-                action: "Run a re-engagement touch that names one problem and one low-friction next step.",
-                talkingPoints: [
-                    `Anchor on the cost of stalled follow-up or weak pipeline visibility at ${companyLabel}.`,
-                    `Tie the message back to ${deal.stage.toLowerCase()} momentum instead of product features.`,
-                    "Offer a 15-minute workflow teardown with two concrete outcomes.",
-                ],
-            };
-        }
-
-        if (categories.has("stakeholder")) {
-            return {
-                headline: "Broaden stakeholder coverage before the deal stalls",
-                action: "Add one operational stakeholder and one economic stakeholder to the next step.",
-                talkingPoints: [
-                    "Confirm who owns the workflow problem internally.",
-                    "Ask who will evaluate process impact and implementation effort.",
-                    "Position CustBuds as a shared workflow layer across sales leadership and RevOps.",
-                ],
-            };
-        }
-
-        if (categories.has("timeline")) {
-            return {
-                headline: "Close the gap between stage and close date",
-                action: "Re-baseline the mutual plan and agree on a realistic decision path.",
-                talkingPoints: [
-                    `Point out the compressed timeline between ${deal.stage.toLowerCase()} and the target close.`,
-                    "Ask which approvals or proof points are still missing.",
-                    "Offer a tighter pilot or success plan instead of a broad rollout conversation.",
-                ],
-            };
-        }
-
-        return {
-            headline: "Tighten coverage before the deal weakens further",
-            action: "Fill the missing CRM context and reconnect the opportunity to a clear business pain.",
-            talkingPoints: [
-                `Use ${proofPoint} as the opening context.`,
-                "Confirm owner, contact, and next-step accountability.",
-                "Move the conversation from generic interest to a concrete workflow bottleneck.",
-            ],
-        };
-    };
-
     const localIntelligence = useMemo(() => {
         const activeDeals = (readStoredRows(DEALS_STORAGE_KEY) as DealRecord[]).filter(deal => deal.status === "active");
         const meetings = readStoredRows("custbuds_meetings");
@@ -2667,7 +2662,7 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
                 contact: deal.contact,
                 activityCount: relatedActivities.length,
                 lastActivityLabel: formatRelativeDayLabel(lastActivity),
-                recovery: recoveryForDeal(categories, deal, research),
+                recovery: null,
                 researchSummary: research?.researchSummary || "",
                 companyFocus: research?.publicSignals?.[0]?.detail || "",
             } as DealIntelRecord;
@@ -2678,14 +2673,9 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
             atRiskDeals: liveDeals.filter(deal => deal.risk !== "Low").length,
             avgHealth: liveDeals.length > 0 ? Math.round(liveDeals.reduce((sum, deal) => sum + deal.health, 0) / liveDeals.length) : 0,
             pipelineValue: liveDeals.reduce((sum, deal) => sum + parseDealValue(deal.value), 0),
-            recoveryCount: liveDeals.filter(deal => deal.recovery).length,
+            recoveryCount: 0,
             signalCount: liveDeals.reduce((sum, deal) => sum + deal.signals.length, 0),
-            alerts: liveDeals.flatMap(deal => deal.signals.slice(0, 2).map(signal => ({
-                icon: deal.risk === "High" ? "!" : deal.risk === "Medium" ? "i" : "+",
-                msg: `${deal.name}: ${signal}`,
-                time: deal.lastActivityLabel,
-                tone: deal.risk === "High" ? "danger" : deal.risk === "Medium" ? "info" : "positive",
-            } as DealIntelAlert))).slice(0, 5),
+            alerts: [] as DealIntelAlert[],
         };
     }, [agentResults, refreshTick]);
 
@@ -2695,16 +2685,12 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
             name: deal.name,
             value: deal.value,
             stage: deal.stage,
-            health: deal.health,
-            risk: deal.risk,
-            signals: deal.signals,
             owner: deal.owner,
             close: deal.close,
             company: deal.company,
             contact: deal.contact,
             activityCount: deal.activityCount,
             lastActivityLabel: deal.lastActivityLabel,
-            recovery: deal.recovery,
             researchSummary: deal.researchSummary,
             companyFocus: deal.companyFocus,
         })),
@@ -2731,27 +2717,16 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
                 if (!res.ok) throw new Error(`Deal intelligence failed with status ${res.status}`);
                 const data: DealIntelModelResponse = await res.json();
                 if (!ignore) {
-                    setModelIntel(current => {
-                        const currentHasOutput = Boolean(current && ((current.alerts?.length || 0) > 0 || (current.monitor?.length || 0) > 0));
-                        const nextHasOutput = Boolean((data.alerts?.length || 0) > 0 || (data.monitor?.length || 0) > 0);
-                        const nextValue =
-                            nextHasOutput
-                                ? data
-                                : currentHasOutput
-                                ? {
-                                    ...current!,
-                                    authBlocked: data.authBlocked,
-                                    fallbackReason: data.fallbackReason,
-                                }
-                                : data;
-
+                    setModelIntel(() => {
                         try {
-                            if (nextValue && (((nextValue.alerts?.length || 0) > 0) || ((nextValue.monitor?.length || 0) > 0) || nextValue.authBlocked)) {
-                                sessionStorage.setItem(DEAL_INTEL_SESSION_KEY, JSON.stringify(nextValue));
+                            if (data && (((data.alerts?.length || 0) > 0) || ((data.monitor?.length || 0) > 0) || data.authBlocked || data.fallback)) {
+                                sessionStorage.setItem(DEAL_INTEL_SESSION_KEY, JSON.stringify(data));
+                            } else {
+                                sessionStorage.removeItem(DEAL_INTEL_SESSION_KEY);
                             }
                         } catch {}
 
-                        return nextValue;
+                        return data;
                     });
                 }
             } catch {
@@ -3869,31 +3844,108 @@ function PlaceholderView({ title, desc }: { title: string; desc: string }) {
     );
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Root Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─────────── Auth types ─────────── */
+type AuthUser = { name: string; email: string; color: string };
+
+/* ─────────── Login Screen ─────────── */
+function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
+    const [name, setName] = useState("");
+    const [email, setEmail] = useState("");
+    const [err, setErr] = useState("");
+    const COLORS = ["#0ea5e9", "#f59e0b", "#10b981", "#8b5cf6", "#ef4444", "#f97316"];
+    const pickColor = (e: string) => COLORS[e.charCodeAt(0) % COLORS.length];
+    const handleSubmit = (ev: React.FormEvent) => {
+        ev.preventDefault();
+        if (!name.trim()) { setErr("Please enter your name."); return; }
+        if (!email.trim() || !email.includes("@")) { setErr("Please enter a valid email."); return; }
+        const user: AuthUser = { name: name.trim(), email: email.trim().toLowerCase(), color: pickColor(email.trim()) };
+        localStorage.setItem("custbuds_user", JSON.stringify(user));
+        onLogin(user);
+    };
+    return (
+        <div className="min-h-screen flex items-center justify-center" style={{ background: "linear-gradient(135deg,#070f1e 0%,#0c1f3f 55%,#071428 100%)" }}>
+            <div className="w-full max-w-sm px-4">
+                <div className="flex flex-col items-center mb-10">
+                    <div className="mb-5">
+                        <svg viewBox="0 0 64 64" className="w-20 h-20" fill="none">
+                            <defs>
+                                <linearGradient id="lbg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0%" stopColor="#0f172a"/><stop offset="55%" stopColor="#0369a1"/><stop offset="100%" stopColor="#0d9488"/>
+                                </linearGradient>
+                                <linearGradient id="lp1" x1="28" y1="18" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0%" stopColor="#38bdf8"/><stop offset="100%" stopColor="#0ea5e9"/>
+                                </linearGradient>
+                                <linearGradient id="lp2" x1="8" y1="18" x2="40" y2="56" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0%" stopColor="#5eead4"/><stop offset="100%" stopColor="#14b8a6"/>
+                                </linearGradient>
+                            </defs>
+                            <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#lbg)"/>
+                            <circle cx="24" cy="22" r="8.5" fill="url(#lp2)"/>
+                            <path d="M8 54 L8 42 C8 38 14 34 24 34 C31 34 35.5 37 37.5 43 L37.5 54 Z" fill="url(#lp2)" opacity="0.8"/>
+                            <circle cx="38" cy="24" r="9" fill="url(#lp1)"/>
+                            <path d="M20 58 L20 47 C20 40 26 35.5 38 35.5 C50 35.5 56 40 56 47 L56 58 Z" fill="url(#lp1)"/>
+                            <circle cx="21" cy="19" r="2.5" fill="white" opacity="0.2"/>
+                            <circle cx="35" cy="21" r="2.8" fill="white" opacity="0.18"/>
+                        </svg>
+                    </div>
+                    <h1 className="text-3xl font-black text-white tracking-tight"><span className="text-white">Cust</span><span className="text-sky-400">Buds</span></h1>
+                    <p className="mt-1 text-xs text-slate-500 uppercase tracking-[0.22em] font-semibold">AI-Native CRM</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 shadow-2xl px-8 py-8" style={{ background: "rgba(255,255,255,0.04)", backdropFilter: "blur(20px)" }}>
+                    <h2 className="text-xl font-bold text-white mb-1">Welcome back</h2>
+                    <p className="text-sm text-slate-400 mb-6">Sign in to your workspace</p>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Full Name</label>
+                            <input autoFocus value={name} onChange={e => { setName(e.target.value); setErr(""); }} placeholder="Your name"
+                                className="w-full px-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:outline-none focus:border-sky-500 transition-colors"
+                                style={{ background: "rgba(255,255,255,0.07)" }}/>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Email Address</label>
+                            <input type="email" value={email} onChange={e => { setEmail(e.target.value); setErr(""); }} placeholder="you@company.com"
+                                className="w-full px-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:outline-none focus:border-sky-500 transition-colors"
+                                style={{ background: "rgba(255,255,255,0.07)" }}/>
+                        </div>
+                        {err && <p className="text-xs text-red-400 font-medium">{err}</p>}
+                        <button type="submit" className="w-full py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95"
+                            style={{ background: "linear-gradient(135deg,#0ea5e9,#0369a1)" }}>
+                            Sign in to CustBuds
+                        </button>
+                    </form>
+                </div>
+                <p className="text-center text-xs text-slate-700 mt-6">© 2025 CustBuds · AI-Native CRM</p>
+            </div>
+        </div>
+    );
+}
+
+/* ─────────── Root Dashboard ─────────── */
 export default function CRMDashboard() {
+    // ── Auth: all hooks MUST come before any early return ──
+    const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+        try { const s = localStorage.getItem("custbuds_user"); return s ? JSON.parse(s) : null; }
+        catch { return null; }
+    });
+    const handleLogin = (user: AuthUser) => setCurrentUser(user);
+    const handleSignOut = () => { localStorage.clear(); setCurrentUser(null); };
+
+    // All state/ref/effect hooks MUST be declared unconditionally before any return
     const [searchValue, setSearchValue] = useState("");
     const [activeNav, setActiveNav] = useState("companies");
-
-    // â”€â”€ Prospecting Agent state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // isProspecting: true while we're waiting for the backend to respond
     const [isProspecting, setIsProspecting] = useState(false);
-    // agentResult: populated once the backend returns
     const [agentResults, setAgentResults] = useState<AgentResult[]>(() => {
         try { const s = localStorage.getItem("custbuds_agent_results"); return s ? JSON.parse(s) : []; }
         catch { return []; }
     });
     useEffect(() => { try { localStorage.setItem("custbuds_agent_results", JSON.stringify(agentResults)); } catch {} }, [agentResults]);
     const [agentResult, setAgentResult] = useState<AgentResult | null>(null);
-
-    // â”€â”€ Avatar Options â”€â”€
-    const accounts = [
-        { name: "Shlok Parekh", email: "shlok@custbuds.com", color: "#0ea5e9" },
-        { name: "Sales Team", email: "sales@custbuds.com", color: "#f59e0b" },
-        { name: "Demo User", email: "demo@custbuds.com", color: "#10b981" },
-    ];
-    const [activeAccount, setActiveAccount] = useState(accounts[0]);
     const [showAccountMenu, setShowAccountMenu] = useState(false);
-    
+    const [showEmailProviderModal, setShowEmailProviderModal] = useState(false);
+    const [emailProvider, setEmailProvider] = useState<EmailProviderConfig | null>(() => {
+        try { const stored = localStorage.getItem("custbuds_email_provider"); return stored ? JSON.parse(stored) : null; }
+        catch { return null; }
+    });
     const accountMenuRef = useRef<HTMLDivElement>(null);
     const accountBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -3907,11 +3959,31 @@ export default function CRMDashboard() {
         return () => document.removeEventListener("mousedown", handler);
     }, []);
 
+    useEffect(() => {
+        try {
+            if (emailProvider) localStorage.setItem("custbuds_email_provider", JSON.stringify(emailProvider));
+            else localStorage.removeItem("custbuds_email_provider");
+        } catch {}
+    }, [emailProvider]);
+
+    // ── Early return AFTER all hooks ──
+    if (!currentUser) return <LoginScreen onLogin={handleLogin} />;
+
+    const activeAccount = currentUser;
+    
     /**
      * handleAgentResult
      * Called by CreateCompanyModal (via CompaniesView) after the backend
      * returns the AI-generated prospecting result.
      */
+    const handleDeleteAgentResult = (idx: number) => {
+        setAgentResults(prev => prev.filter((_, i) => i !== idx));
+    };
+
+    const handleClearHistory = () => {
+        setAgentResults([]);
+    };
+
     const handleAgentResult = (result: AgentResult | null) => {
         setIsProspecting(false);
         if (result) {
@@ -3962,29 +4034,13 @@ export default function CRMDashboard() {
         setIsProspecting(false);
     };
 
-    const [showEmailProviderModal, setShowEmailProviderModal] = useState(false);
-    const [emailProvider, setEmailProvider] = useState<EmailProviderConfig | null>(() => {
-        try {
-            const stored = localStorage.getItem("custbuds_email_provider");
-            return stored ? JSON.parse(stored) : null;
-        } catch {
-            return null;
-        }
-    });
-
-    useEffect(() => {
-        try {
-            if (emailProvider) localStorage.setItem("custbuds_email_provider", JSON.stringify(emailProvider));
-            else localStorage.removeItem("custbuds_email_provider");
-        } catch {}
-    }, [emailProvider]);
-
     const handleSaveEmailProvider = (config: EmailProviderConfig) => {
         setEmailProvider(config);
         setShowEmailProviderModal(false);
     };
 
     const findProspectRecipient = (result: AgentResult) => {
+        if (result.targetEmail && result.targetEmail.includes("@")) return result.targetEmail;
         const lookupCompany = normaliseLookupKey(result.companyName);
         const lookupContact = normaliseLookupKey(result.enrichedProfile?.key_contact?.name || "");
 
@@ -4019,7 +4075,7 @@ export default function CRMDashboard() {
                 body: JSON.stringify({
                     companyName: result.companyName,
                     city: companyRecord?.["City"] || "",
-                    companySize: companyRecord?.["Company Size"] || result.enrichedProfile?.headcount_range || "",
+                    companySize: companyRecord?.["Company Size"] || result.enrichedProfile?.company_size || "",
                     type: companyRecord?.["Type"] || "Prospect",
                     owner: result.enrichedProfile?.key_contact?.name || "",
                 }),
@@ -4037,9 +4093,10 @@ export default function CRMDashboard() {
     };
 
     const handleStartSequence = async (result: AgentResult, emailKey: "email1" | "email2") => {
+        const activeProvider = emailProvider?.provider || "Gmail";
+
         const draft = parseEmailDraft(result[emailKey] || "");
         const recipient = findProspectRecipient(result);
-        const activeProvider = emailProvider?.provider || "Other";
         const bodyWithSignature = [draft.body, emailProvider?.signature || ""].filter(Boolean).join("\n\n");
         const composeUrl = buildComposeUrl({
             provider: activeProvider,
@@ -4200,34 +4257,25 @@ export default function CRMDashboard() {
                         </button>
 
                         {showAccountMenu && (
-                            <div ref={accountMenuRef} className="absolute top-full right-0 mt-2 w-56 bg-white border border-gray-200 rounded-xl shadow-xl z-50 py-2 overflow-hidden">
-                                <div className="px-4 py-2 border-b border-gray-100 mb-1">
-                                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Switch Account</p>
+                            <div ref={accountMenuRef} className="absolute top-full right-0 mt-2 w-60 bg-white border border-gray-200 rounded-xl shadow-xl z-50 py-2 overflow-hidden">
+                                {/* Current user info */}
+                                <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+                                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: activeAccount.color }}>
+                                        {activeAccount.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div className="flex flex-col overflow-hidden">
+                                        <span className="text-sm font-semibold text-gray-900 truncate">{activeAccount.name}</span>
+                                        <span className="text-xs text-gray-500 truncate">{activeAccount.email}</span>
+                                    </div>
                                 </div>
-                                {accounts.map((acc, idx) => (
-                                    <button 
-                                        key={idx}
-                                        onClick={() => { setActiveAccount(acc); setShowAccountMenu(false); }}
-                                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-slate-50 transition-colors text-left group"
+                                <div className="pt-1">
+                                    <button
+                                        onClick={() => { setShowAccountMenu(false); handleSignOut(); }}
+                                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
                                     >
-                                        <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: acc.color }}>
-                                            {acc.name.charAt(0)}
-                                        </div>
-                                        <div className="flex flex-col overflow-hidden">
-                                            <span className={`text-sm font-semibold truncate transition-colors ${activeAccount.email === acc.email ? 'text-sky-600' : 'text-gray-900 group-hover:text-sky-600'}`}>
-                                                {acc.name}
-                                            </span>
-                                            <span className="text-xs text-gray-500 truncate">{acc.email}</span>
-                                        </div>
-                                        {activeAccount.email === acc.email && (
-                                            <svg className="w-4 h-4 text-sky-500 ml-auto flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                            </svg>
-                                        )}
-                                    </button>
-                                ))}
-                                <div className="border-t border-gray-100 mt-1 pt-1">
-                                    <button className="w-full text-left px-4 py-2 text-sm font-medium text-gray-600 hover:bg-slate-50 hover:text-gray-900 transition-colors">
+                                        <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                            <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 001 1h6a1 1 0 100-2H4V5h5a1 1 0 100-2H3zm10.293 3.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L14.586 11H8a1 1 0 110-2h6.586l-1.293-1.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                                        </svg>
                                         Sign out
                                     </button>
                                 </div>
@@ -4259,6 +4307,7 @@ export default function CRMDashboard() {
                         {agentResult && (
                             <AgentResultPanel
                                 result={agentResult}
+                                recipientEmail={findProspectRecipient(agentResult)}
                                 onClose={() => setAgentResult(null)}
                                 emailProvider={emailProvider}
                                 onConnectProvider={() => setShowEmailProviderModal(true)}
@@ -4273,7 +4322,7 @@ export default function CRMDashboard() {
                          activeNav === "deals" ? <DealsView /> :
                          activeNav === "meetings" ? <MeetingsView /> :
                          activeNav === "calls" ? <CallsView /> :
-                         activeNav === "prospecting" ? <ProspectingAgentView agentResults={agentResults} onProspectAll={handleProspectAll} isProspecting={isProspecting} /> :
+                         activeNav === "prospecting" ? <ProspectingAgentView agentResults={agentResults} onProspectAll={handleProspectAll} isProspecting={isProspecting} onDeleteResult={handleDeleteAgentResult} onClearHistory={handleClearHistory} /> :
                          activeNav === "deal-intel" ? <DealIntelligenceView agentResults={agentResults} /> :
                          <CompaniesView onAgentStart={handleAgentStart} onAgentResult={handleAgentResult} />}
                     </div>
