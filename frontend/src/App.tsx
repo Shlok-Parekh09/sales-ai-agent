@@ -134,6 +134,16 @@ type EmailProviderConfig = {
     connectedAt: string;
 };
 
+type SellerContext = {
+    companyName: string;
+    companyWebsite?: string;
+    companyDescription: string;
+    outreachGoal: string;
+    idealCustomer?: string;
+    senderName?: string;
+    senderEmail?: string;
+};
+
 const parseEmailDraft = (rawBody: string) => {
     const trimmed = String(rawBody || "").trim();
     const lines = trimmed.split("\n").map(line => line.trim()).filter(Boolean);
@@ -672,11 +682,12 @@ function EditableCell({ value, onChange, className = "", link = false }: {
 }
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Create Company Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-function CreateCompanyModal({ onClose, onSave, onAgentStart, onAgentResult }: {
+function CreateCompanyModal({ onClose, onSave, onAgentStart, onAgentResult, sellerContext }: {
     onClose: () => void;
     onSave: (form: any) => void;
     onAgentStart?: () => void;
     onAgentResult?: (result: AgentResult | null) => void;
+    sellerContext?: SellerContext;
 }) {
     const [form, setForm] = useState({
         domain: "",
@@ -859,6 +870,7 @@ function CreateCompanyModal({ onClose, onSave, onAgentStart, onAgentResult }: {
                                             companySize: form.companySize,
                                             type: form.type,
                                             email: form.email || "",
+                                            sellerContext,
                                         }),
                                     });
                                     if (!res.ok) throw new Error(await res.text());
@@ -1705,7 +1717,15 @@ function ContactsView() {
 }
 
 /* â”€â”€â”€â”€â”€â”€â”€â”€â”€ Companies View â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => void, onAgentResult?: (r: AgentResult | null) => void }) {
+function CompaniesView({
+    onAgentStart,
+    onAgentResult,
+    sellerContext,
+}: {
+    onAgentStart?: () => void;
+    onAgentResult?: (r: AgentResult | null) => void;
+    sellerContext?: SellerContext;
+}) {
     const [tableSearch, setTableSearch] = useState("");
     const [showAddMenu, setShowAddMenu] = useState(false);
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -1908,6 +1928,7 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
                     city: selectedCompany["City"] || selectedCompany.city || "",
                     companySize: selectedCompany["Company Size"] || selectedCompany.companySize || "",
                     type: selectedCompany["Type"] || selectedCompany.type || "Prospect",
+                    sellerContext,
                 }),
             });
 
@@ -1924,7 +1945,7 @@ function CompaniesView({ onAgentStart, onAgentResult }: { onAgentStart?: () => v
 
     return (
         <>
-            {showCreateModal && <CreateCompanyModal onClose={() => setShowCreateModal(false)} onSave={handleSaveNew} onAgentStart={onAgentStart} onAgentResult={onAgentResult} />}
+            {showCreateModal && <CreateCompanyModal onClose={() => setShowCreateModal(false)} onSave={handleSaveNew} onAgentStart={onAgentStart} onAgentResult={onAgentResult} sellerContext={sellerContext} />}
             {showImport && <ImportModal columns={columns} onClose={() => setShowImport(false)} onImport={handleImport} />}
             {/* Note: CompaniesView passes onAgentResult through the dashboard â€” see CRMDashboard */}
 
@@ -2286,8 +2307,9 @@ function ProspectingAgentView({
 
     const handleForward = (emailBody: string) => {
         if (!forwardTo.trim()) return;
-        const subject = encodeURIComponent(`Outreach from CustBuds`);
-        const body = encodeURIComponent(emailBody);
+        const draft = parseEmailDraft(emailBody);
+        const subject = encodeURIComponent(draft.subject);
+        const body = encodeURIComponent(draft.body);
         window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(forwardTo.trim())}&su=${subject}&body=${body}`, '_blank');
         setForwarded(true);
     };
@@ -3845,12 +3867,17 @@ function PlaceholderView({ title, desc }: { title: string; desc: string }) {
 }
 
 /* ─────────── Auth types ─────────── */
-type AuthUser = { name: string; email: string; color: string };
+type AuthUser = SellerContext & { name: string; email: string; color: string };
 
 /* ─────────── Login Screen ─────────── */
-function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
-    const [name, setName] = useState("");
-    const [email, setEmail] = useState("");
+function LoginScreen({ onLogin, initialUser }: { onLogin: (user: AuthUser) => void; initialUser?: Partial<AuthUser> | null }) {
+    const [name, setName] = useState(initialUser?.name || "");
+    const [email, setEmail] = useState(initialUser?.email || "");
+    const [companyName, setCompanyName] = useState(initialUser?.companyName || "");
+    const [companyWebsite, setCompanyWebsite] = useState(initialUser?.companyWebsite || "");
+    const [companyDescription, setCompanyDescription] = useState(initialUser?.companyDescription || "");
+    const [outreachGoal, setOutreachGoal] = useState(initialUser?.outreachGoal || "");
+    const [idealCustomer, setIdealCustomer] = useState(initialUser?.idealCustomer || "");
     const [err, setErr] = useState("");
     const COLORS = ["#0ea5e9", "#f59e0b", "#10b981", "#8b5cf6", "#ef4444", "#f97316"];
     const pickColor = (e: string) => COLORS[e.charCodeAt(0) % COLORS.length];
@@ -3858,14 +3885,28 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
         ev.preventDefault();
         if (!name.trim()) { setErr("Please enter your name."); return; }
         if (!email.trim() || !email.includes("@")) { setErr("Please enter a valid email."); return; }
-        const user: AuthUser = { name: name.trim(), email: email.trim().toLowerCase(), color: pickColor(email.trim()) };
+        if (!companyName.trim()) { setErr("Please enter your company name."); return; }
+        if (!companyDescription.trim()) { setErr("Please describe what your company sells."); return; }
+        if (!outreachGoal.trim()) { setErr("Please enter what your sales team wants to outreach about."); return; }
+        const user: AuthUser = {
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
+            color: initialUser?.color || pickColor(email.trim()),
+            companyName: companyName.trim(),
+            companyWebsite: companyWebsite.trim(),
+            companyDescription: companyDescription.trim(),
+            outreachGoal: outreachGoal.trim(),
+            idealCustomer: idealCustomer.trim(),
+            senderName: name.trim(),
+            senderEmail: email.trim().toLowerCase(),
+        };
         localStorage.setItem("custbuds_user", JSON.stringify(user));
         onLogin(user);
     };
     return (
         <div className="min-h-screen flex items-center justify-center" style={{ background: "linear-gradient(135deg,#070f1e 0%,#0c1f3f 55%,#071428 100%)" }}>
-            <div className="w-full max-w-sm px-4">
-                <div className="flex flex-col items-center mb-10">
+            <div className="w-full max-w-xl px-4">
+                <div className="flex flex-col items-center mb-8">
                     <div className="mb-5">
                         <svg viewBox="0 0 64 64" className="w-20 h-20" fill="none">
                             <defs>
@@ -3893,24 +3934,58 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
                 </div>
                 <div className="rounded-2xl border border-white/10 shadow-2xl px-8 py-8" style={{ background: "rgba(255,255,255,0.04)", backdropFilter: "blur(20px)" }}>
                     <h2 className="text-xl font-bold text-white mb-1">Welcome back</h2>
-                    <p className="text-sm text-slate-400 mb-6">Sign in to your workspace</p>
+                    <p className="text-sm text-slate-400 mb-6">Set up your sales workspace</p>
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="grid gap-4 md:grid-cols-2">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Full Name</label>
+                                <input autoFocus value={name} onChange={e => { setName(e.target.value); setErr(""); }} placeholder="Your name"
+                                    className="w-full px-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:outline-none focus:border-sky-500 transition-colors"
+                                    style={{ background: "rgba(255,255,255,0.07)" }}/>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Email Address</label>
+                                <input type="email" value={email} onChange={e => { setEmail(e.target.value); setErr(""); }} placeholder="you@company.com"
+                                    className="w-full px-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:outline-none focus:border-sky-500 transition-colors"
+                                    style={{ background: "rgba(255,255,255,0.07)" }}/>
+                            </div>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Company</label>
+                                <input value={companyName} onChange={e => { setCompanyName(e.target.value); setErr(""); }} placeholder="Your company"
+                                    className="w-full px-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:outline-none focus:border-sky-500 transition-colors"
+                                    style={{ background: "rgba(255,255,255,0.07)" }}/>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Website</label>
+                                <input value={companyWebsite} onChange={e => { setCompanyWebsite(e.target.value); setErr(""); }} placeholder="company.com"
+                                    className="w-full px-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:outline-none focus:border-sky-500 transition-colors"
+                                    style={{ background: "rgba(255,255,255,0.07)" }}/>
+                            </div>
+                        </div>
                         <div>
-                            <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Full Name</label>
-                            <input autoFocus value={name} onChange={e => { setName(e.target.value); setErr(""); }} placeholder="Your name"
-                                className="w-full px-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:outline-none focus:border-sky-500 transition-colors"
+                            <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">What You Sell</label>
+                            <textarea value={companyDescription} onChange={e => { setCompanyDescription(e.target.value); setErr(""); }} placeholder="Example: We help mid-market retailers improve field sales productivity with route planning and order capture software."
+                                className="w-full min-h-[80px] px-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:outline-none focus:border-sky-500 transition-colors resize-y"
                                 style={{ background: "rgba(255,255,255,0.07)" }}/>
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Email Address</label>
-                            <input type="email" value={email} onChange={e => { setEmail(e.target.value); setErr(""); }} placeholder="you@company.com"
+                            <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Outreach Goal</label>
+                            <textarea value={outreachGoal} onChange={e => { setOutreachGoal(e.target.value); setErr(""); }} placeholder="Example: Start conversations with sales leaders about reducing missed follow-ups and improving rep productivity."
+                                className="w-full min-h-[72px] px-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:outline-none focus:border-sky-500 transition-colors resize-y"
+                                style={{ background: "rgba(255,255,255,0.07)" }}/>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Ideal Customer</label>
+                            <input value={idealCustomer} onChange={e => { setIdealCustomer(e.target.value); setErr(""); }} placeholder="Example: B2B companies with 50-500 sales reps"
                                 className="w-full px-4 py-2.5 rounded-xl text-sm text-white placeholder-slate-500 border border-white/10 focus:outline-none focus:border-sky-500 transition-colors"
                                 style={{ background: "rgba(255,255,255,0.07)" }}/>
                         </div>
                         {err && <p className="text-xs text-red-400 font-medium">{err}</p>}
                         <button type="submit" className="w-full py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95"
                             style={{ background: "linear-gradient(135deg,#0ea5e9,#0369a1)" }}>
-                            Sign in to CustBuds
+                            Continue to Workspace
                         </button>
                     </form>
                 </div>
@@ -3967,9 +4042,20 @@ export default function CRMDashboard() {
     }, [emailProvider]);
 
     // ── Early return AFTER all hooks ──
-    if (!currentUser) return <LoginScreen onLogin={handleLogin} />;
+    if (!currentUser || !currentUser.companyName || !currentUser.companyDescription || !currentUser.outreachGoal) {
+        return <LoginScreen onLogin={handleLogin} initialUser={currentUser} />;
+    }
 
     const activeAccount = currentUser;
+    const sellerContext: SellerContext = {
+        companyName: activeAccount.companyName,
+        companyWebsite: activeAccount.companyWebsite || "",
+        companyDescription: activeAccount.companyDescription,
+        outreachGoal: activeAccount.outreachGoal,
+        idealCustomer: activeAccount.idealCustomer || "",
+        senderName: activeAccount.name,
+        senderEmail: activeAccount.email,
+    };
     
     /**
      * handleAgentResult
@@ -4021,6 +4107,7 @@ export default function CRMDashboard() {
                         city: company["City"] || company.city || "",
                         companySize: company["Company Size"] || company.companySize || "",
                         type: company["Type"] || company.type || "Prospect",
+                        sellerContext,
                     }),
                 });
                 if (res.ok) {
@@ -4078,6 +4165,7 @@ export default function CRMDashboard() {
                     companySize: companyRecord?.["Company Size"] || result.enrichedProfile?.company_size || "",
                     type: companyRecord?.["Type"] || "Prospect",
                     owner: result.enrichedProfile?.key_contact?.name || "",
+                    sellerContext,
                 }),
             });
 
@@ -4318,13 +4406,13 @@ export default function CRMDashboard() {
                         )}
 
                         {activeNav === "contacts" ? <ContactsView /> :
-                         activeNav === "companies" ? <CompaniesView onAgentStart={handleAgentStart} onAgentResult={handleAgentResult} /> :
+                         activeNav === "companies" ? <CompaniesView onAgentStart={handleAgentStart} onAgentResult={handleAgentResult} sellerContext={sellerContext} /> :
                          activeNav === "deals" ? <DealsView /> :
                          activeNav === "meetings" ? <MeetingsView /> :
                          activeNav === "calls" ? <CallsView /> :
                          activeNav === "prospecting" ? <ProspectingAgentView agentResults={agentResults} onProspectAll={handleProspectAll} isProspecting={isProspecting} onDeleteResult={handleDeleteAgentResult} onClearHistory={handleClearHistory} /> :
                          activeNav === "deal-intel" ? <DealIntelligenceView agentResults={agentResults} /> :
-                         <CompaniesView onAgentStart={handleAgentStart} onAgentResult={handleAgentResult} />}
+                         <CompaniesView onAgentStart={handleAgentStart} onAgentResult={handleAgentResult} sellerContext={sellerContext} />}
                     </div>
                 </main>
             </div>

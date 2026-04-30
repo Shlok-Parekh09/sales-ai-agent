@@ -30,7 +30,7 @@ let mistralAuthBlockedLogged = false;
 const FIT_SCORE_RUBRIC = [
   { label: "ICP alignment", weight: 0.25 },
   { label: "Business trigger urgency", weight: 0.2 },
-  { label: "Revenue workflow pain", weight: 0.25 },
+  { label: "Problem fit", weight: 0.25 },
   { label: "Buying committee clarity", weight: 0.15 },
   { label: "Evidence quality", weight: 0.15 },
 ];
@@ -49,6 +49,19 @@ function buildCompanyContext({ companyName, city, companySize, type, owner }) {
       owner && owner.trim() !== "" && owner.trim() !== "No owner"
         ? { name: owner.trim(), title: "" }
         : null,
+  };
+}
+
+function normaliseSellerContext(value) {
+  const seller = value && typeof value === "object" ? value : {};
+  return {
+    companyName: safeTrim(seller.companyName),
+    companyWebsite: safeTrim(seller.companyWebsite),
+    companyDescription: safeTrim(seller.companyDescription),
+    outreachGoal: safeTrim(seller.outreachGoal),
+    idealCustomer: safeTrim(seller.idealCustomer),
+    senderName: safeTrim(seller.senderName),
+    senderEmail: safeTrim(seller.senderEmail),
   };
 }
 
@@ -214,11 +227,14 @@ async function fetchCompanyResearch(context) {
 
 function buildProspectingFallback({
   context,
+  scoreReasoning = "No analysis was generated because a valid Groq API key is not configured.",
+  researchSummary = "Research is unavailable until a valid Groq API key is configured.",
+  fallbackReason = "GROQ_API_KEY is not configured.",
 }) {
   return {
     fitScore: 0,
-    scoreReasoning: "No analysis was generated because a valid Groq API key is not configured.",
-    researchSummary: "Research is unavailable until a valid Groq API key is configured.",
+    scoreReasoning,
+    researchSummary,
     publicSignals: [],
     fitBreakdown: [],
     buyerPersonas: [],
@@ -230,6 +246,7 @@ function buildProspectingFallback({
     nextActions: [],
     generatedAt: new Date().toISOString(),
     fallback: true,
+    fallbackReason,
     researchAvailable: false,
     enrichedProfile: context,
   };
@@ -245,7 +262,7 @@ function normaliseFitBreakdown(value) {
 
     return {
       label: rubricItem.label,
-      score: clamp(Number(rawItem.score || 0), 0, 100),
+      score: clamp(Number(rawItem.score === undefined || rawItem.score === null || rawItem.score === "" ? 50 : rawItem.score), 0, 100),
       summary: safeTrim(rawItem.summary),
     };
   });
@@ -263,7 +280,7 @@ function calculateFitScore(fitBreakdown, researchAvailable) {
 
   const evidenceQuality =
     fitBreakdown.find((item) => item.label === "Evidence quality")?.score || 0;
-  const cappedScore = evidenceQuality < 40 ? Math.min(weightedScore, 55) : weightedScore;
+  const cappedScore = evidenceQuality < 35 ? Math.min(weightedScore, 60) : weightedScore;
 
   return clamp(Math.round(cappedScore), 0, 100);
 }
@@ -540,6 +557,7 @@ async function prospectHandler(req, res) {
   }
 
   const context = buildCompanyContext({ companyName, city, companySize, type, owner });
+  const sellerContext = normaliseSellerContext(req.body?.sellerContext);
 
   const fallback = buildProspectingFallback({
     context,
@@ -564,33 +582,43 @@ async function prospectHandler(req, res) {
 
   if (!research.available) {
     return res.json({
-      ...fallback,
+      ...buildProspectingFallback({
+        context,
+        scoreReasoning:
+          "Groq is configured, but source-backed fit scoring requires a Tavily API key.",
+        researchSummary: research.reason,
+        fallbackReason: research.reason,
+      }),
       researchSummary: research.reason,
       fallbackReason: research.reason,
     });
   }
 
-  const systemPrompt = `You are a B2B sales prospecting agent for CustBuds CRM.
+  const systemPrompt = `You are a B2B sales prospecting agent for the seller's company.
 Your job is to:
 1. Produce a detailed, source-backed company research brief.
-2. Score fit for CustBuds using the required rubric.
+2. Score fit for the seller's offering using the required rubric.
 3. Write personalized outreach based on the supplied CRM inputs and research sources.
 4. Create adaptive messaging adjustments based on the supplied CRM inputs and research sources.
-5. Summarize verified company priorities, likely sales workflow problems, and how CustBuds can help.
+5. Summarize verified company priorities, likely business problems, and how the seller's company can help.
 
 Return ONLY valid JSON.
 
 Quality rules:
 - Write in polished, professional English with correct grammar.
 - Use only the supplied CRM inputs and research sources.
+- Write from the seller's company, not from CustBuds unless the seller's company is actually CustBuds.
 - Do not invent research, contacts, company news, headcount, market facts, metrics, funding, technology, or activity history.
 - Do not use placeholder or hardcoded values.
 - If a field cannot be supported by the supplied inputs, leave it empty or explain that the information is unavailable.
 - Avoid casual phrasing, hype, and unsupported claims.
 - Every publicSignals item must include a source title or source URL from the supplied research sources.
-- fitBreakdown must use exactly these five labels in this order: ICP alignment, Business trigger urgency, Revenue workflow pain, Buying committee clarity, Evidence quality.
-- Score each fitBreakdown category conservatively. Penalize missing evidence.
+- fitBreakdown must use exactly these five labels in this order: ICP alignment, Business trigger urgency, Problem fit, Buying committee clarity, Evidence quality.
+- Score each fitBreakdown category fairly. Treat unknown information as neutral around 50, not as a poor fit. Use scores below 40 only when the evidence shows a clear mismatch. Use 70-85 for credible fit with partial evidence and 85+ only for strongly supported fit.
 - The server will calculate final fitScore from fitBreakdown; still return your best fitScore estimate.
+- email1 and email2 must each start with a clear "Subject:" line and then the email body.
+- Emails must explain what the seller's sales team wants to discuss based on the seller's outreach goal and offering.
+- Emails must not mention CustBuds unless CustBuds is the seller's company.
 
 JSON schema:
 {
@@ -624,6 +652,13 @@ Company size: ${companySize || ""}
 Type: ${type || ""}
 Known contact or owner: ${context.key_contact?.name || ""}
 
+Seller company: ${sellerContext.companyName || "Not provided"}
+Seller website: ${sellerContext.companyWebsite || ""}
+Seller offering: ${sellerContext.companyDescription || "Not provided"}
+Seller outreach goal: ${sellerContext.outreachGoal || "Not provided"}
+Seller ideal customer: ${sellerContext.idealCustomer || ""}
+Sender: ${sellerContext.senderName || ""}${sellerContext.senderEmail ? ` (${sellerContext.senderEmail})` : ""}
+
 Research answer:
 ${research.answer || ""}
 
@@ -637,24 +672,31 @@ Excerpt: ${source.content}`
   )
   .join("\n\n")}
 
-Create a detailed, high-signal output for a revenue team selling an AI-native CRM that improves target research, fit scoring, outreach personalization, and deal-risk visibility.
+Create a detailed, high-signal output for the seller's sales team. The outreach must be about the seller's company, offering, and outreach goal above.
 
 Important:
 - Do not mention tech stacks, frameworks, or tooling.
 - Do not create publicSignals unless the signal is directly supported by the research sources above.
 - Do not include fabricated values, generic market assumptions, or guessed company initiatives.
+- Do not default to CustBuds, CRM, AI-native CRM, target research, fit scoring, outreach personalization, or deal-risk visibility unless those are explicitly part of the seller offering.
 - In researchSummary, clearly include:
   1. a concise company overview,
   2. recent priorities or business developments supported by sources,
-  3. likely sales, pipeline, or go-to-market workflow pressures supported by evidence,
-  4. the most relevant CustBuds positioning angle,
+  3. likely business pressures relevant to the seller's offering,
+  4. the most relevant positioning angle for the seller's company,
   5. uncertainties or gaps that should be verified before outreach.
 - Fit score rubric:
-  - ICP alignment: company size, segment, and operating complexity fit for CustBuds.
+  - ICP alignment: company size, segment, and operating complexity fit for the seller's ideal customer profile.
   - Business trigger urgency: recent changes that make action timely.
-  - Revenue workflow pain: evidence of prospecting, pipeline, sales, partner, or growth execution pressure.
+  - Problem fit: evidence of a problem or opportunity related to the seller's outreach goal.
   - Buying committee clarity: whether the likely buyer function is identifiable from the inputs or sources.
-  - Evidence quality: source quality, specificity, recency, and amount of corroboration.`;
+  - Evidence quality: source quality, specificity, recency, and amount of corroboration.
+- Email requirements:
+  - Generate a professional subject line for each email.
+  - The body must be grammatically correct, concise, and specific.
+  - Explain why the seller is reaching out and what conversation the seller's sales team wants to start.
+  - Tie the opening to verified research about the target company.
+  - Ask for one clear next step.`;
 
   try {
     const completion = await groq.chat.completions.create({
@@ -688,4 +730,9 @@ app.post("/api/agent/deal-intelligence", dealIntelligenceHandler);
 
 app.listen(PORT, () => {
   console.log(`CustBuds Prospecting Agent running on http://localhost:${PORT}`);
+  console.log(
+    `API keys: GROQ_API_KEY=${groqApiKey ? "configured" : "missing"}, TAVILY_API_KEY=${
+      tavilyApiKey ? "configured" : "missing"
+    }, MISTRAL_API_KEY=${mistralApiKey ? "configured" : "missing"}`
+  );
 });

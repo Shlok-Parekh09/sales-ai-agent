@@ -95,12 +95,7 @@ git clone https://github.com/Shlok-Parekh09/AI_based_CRM.git
 cd AI_based_CRM
 ```
 
-### 2. Set up the backend
-
-```bash
-cd backend
-npm install
-```
+### 2. Set up environment variables
 
 Create a `.env` file in the `backend/` directory:
 
@@ -111,25 +106,38 @@ MISTRAL_API_KEY=your_mistral_key_here
 PORT=5000
 ```
 
-Start the backend:
+### 3. Install dependencies
 
 ```bash
-npm start
+npm run install:all
+```
+
+### 4. Start backend and frontend together
+
+```bash
+npm run dev
 ```
 
 The backend will run at `http://localhost:5000`.
+The frontend will open at `http://localhost:3000`.
 
-### 3. Set up the frontend
+You can still start each app separately if needed:
 
-In a new terminal:
+Backend:
+
+```bash
+cd backend
+npm install
+npm start
+```
+
+Frontend:
 
 ```bash
 cd frontend
 npm install
 npm start
 ```
-
-The app will open at `http://localhost:3000`.
 
 ---
 
