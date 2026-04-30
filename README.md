@@ -1,8 +1,3 @@
-## ⚠️ Security Disclaimer: Email Integration
-
-Please note that the current email functionality required to input my email ID and plaintext password directly into the source code. 
-
-**This is a significant privacy and security risk.** Hardcoding credentials means password could be exposed if this code is accessed by unauthorized users. 
 
 # CustBuds CRM
 
