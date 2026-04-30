@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 
-// â”€â”€ TableRow type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-import { CustBudsLogoLockup } from "./components/CustBudsLogo";
+import { CustBudsLogoLockup, CustBudsLogoIcon } from "./components/CustBudsLogo";
 
 type TableRow = {
     id: number;
@@ -3867,88 +3866,182 @@ type AuthUser = SellerContext & { name: string; email: string; color: string };
 
 /* ─────────── Opening Dashboard ─────────── */
 function OpeningDashboard({ onLoginClick }: { onLoginClick: () => void }) {
+    const [activeTab, setActiveTab] = useState<"overview" | "features">("overview");
+
     return (
         <div className="min-h-screen bg-[#f7f8fb] text-gray-900">
             <div className="max-w-6xl mx-auto px-5 pt-6 pb-14">
-                <header className="flex items-center justify-between mb-14">
+                <header className="flex items-center justify-between mb-10">
                     <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-sky-100 text-sky-600 flex items-center justify-center">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-5 h-5">
-                                <path d="M4 20V7.5A1.5 1.5 0 015.5 6H10l2 2h6.5A1.5 1.5 0 0120 9.5V20H4z" />
-                            </svg>
-                        </div>
+                        <CustBudsLogoIcon className="w-9 h-9" />
                         <span className="text-xl font-black tracking-tight">Cust<span className="text-sky-600">Buds</span></span>
                     </div>
-                    <button
-                        onClick={onLoginClick}
-                        className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
-                        style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
-                    >
-                        Login
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={onLoginClick}
+                            className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+                            style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
+                        >
+                            Login
+                        </button>
+                    </div>
                 </header>
 
-                <section className="grid lg:grid-cols-2 gap-10 items-center">
-                    <div>
-                        <p className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-700 mb-4">
-                            AI-native CRM
-                        </p>
-                        <h1 className="text-4xl md:text-5xl font-black leading-tight tracking-tight">
-                            Customer Relationship
-                            <span className="block text-sky-600">Magic</span>
-                        </h1>
-                        <p className="mt-5 text-base text-gray-600 max-w-xl leading-relaxed">
-                            Track opportunities, forecast pipeline health, and close deals faster with one unified sales workspace.
-                        </p>
-                        <div className="mt-7 flex items-center gap-3">
-                            <button
-                                onClick={onLoginClick}
-                                className="px-6 py-3 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-opacity"
-                                style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
-                            >
-                                Start now
-                            </button>
-                            <button
-                                onClick={onLoginClick}
-                                className="px-6 py-3 rounded-xl text-sm font-semibold border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
-                            >
-                                Meet an advisor
-                            </button>
-                        </div>
-                        <p className="mt-3 text-xs text-gray-500">Free workspace setup. Instant access.</p>
-                    </div>
+                {/* ── Tab navigation ── */}
+                <nav className="flex items-center gap-8 border-b border-gray-200 mb-10">
+                    {(["overview", "features"] as const).map((tab) => (
+                        <button
+                            key={tab}
+                            onClick={() => setActiveTab(tab)}
+                            className={`pb-3 text-sm font-semibold capitalize transition-colors relative ${
+                                activeTab === tab ? "text-sky-600" : "text-gray-500 hover:text-gray-700"
+                            }`}
+                        >
+                            {tab}
+                            {activeTab === tab && (
+                                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-sky-500 rounded-full" />
+                            )}
+                        </button>
+                    ))}
+                </nav>
 
-                    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-                        <div className="text-xs uppercase tracking-wider text-gray-400 font-bold mb-3">Pipeline at a glance</div>
-                        <div className="space-y-3">
+                {activeTab === "overview" && (
+                    <>
+                        <section className="grid lg:grid-cols-2 gap-10 items-center">
+                            <div>
+                                <p className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-700 mb-4">
+                                    AI-native CRM
+                                </p>
+                                <h1 className="text-4xl md:text-5xl font-black leading-tight tracking-tight">
+                                    Customer Relationship
+                                    <span className="block text-sky-600">Magic</span>
+                                </h1>
+                                <p className="mt-5 text-base text-gray-600 max-w-xl leading-relaxed">
+                                    Track opportunities, forecast pipeline health, and close deals faster with one unified sales workspace.
+                                </p>
+                                <div className="mt-7 flex items-center gap-3">
+                                    <button
+                                        onClick={onLoginClick}
+                                        className="px-6 py-3 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-opacity"
+                                        style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
+                                    >
+                                        Start now
+                                    </button>
+                                    <button
+                                        onClick={onLoginClick}
+                                        className="px-6 py-3 rounded-xl text-sm font-semibold border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+                                    >
+                                        Meet an advisor
+                                    </button>
+                                </div>
+                                <p className="mt-3 text-xs text-gray-500">Free workspace setup. Instant access.</p>
+                            </div>
+
+                            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+                                <div className="text-xs uppercase tracking-wider text-gray-400 font-bold mb-3">Pipeline at a glance</div>
+                                <div className="space-y-3">
+                                    {[
+                                        ["Discovery", "₹12.4L", "bg-blue-100 text-blue-700"],
+                                        ["Proposal Sent", "₹28.6L", "bg-amber-100 text-amber-700"],
+                                        ["Negotiation", "₹43.2L", "bg-violet-100 text-violet-700"],
+                                        ["Closing Soon", "₹17.8L", "bg-emerald-100 text-emerald-700"],
+                                    ].map(([stage, value, tone]) => (
+                                        <div key={String(stage)} className="flex items-center justify-between rounded-xl border border-gray-100 px-4 py-3">
+                                            <span className="text-sm font-semibold text-gray-800">{stage}</span>
+                                            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${tone}`}>{value}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </section>
+
+                        <section className="mt-14 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
                             {[
-                                ["Discovery", "₹12.4L", "bg-blue-100 text-blue-700"],
-                                ["Proposal Sent", "₹28.6L", "bg-amber-100 text-amber-700"],
-                                ["Negotiation", "₹43.2L", "bg-violet-100 text-violet-700"],
-                                ["Closing Soon", "₹17.8L", "bg-emerald-100 text-emerald-700"],
-                            ].map(([stage, value, tone]) => (
-                                <div key={String(stage)} className="flex items-center justify-between rounded-xl border border-gray-100 px-4 py-3">
-                                    <span className="text-sm font-semibold text-gray-800">{stage}</span>
-                                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${tone}`}>{value}</span>
+                                ["Track opportunities", "Kanban-style pipeline with real-time revenue visibility."],
+                                ["Never miss follow-ups", "Meetings, calls, and sequences in one shared flow."],
+                                ["Unified communication", "Contacts, companies, and outreach context together."],
+                                ["Smart reporting", "Live health scores and AI-assisted recovery plays."],
+                            ].map(([title, text]) => (
+                                <div key={String(title)} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+                                    <h3 className="text-sm font-bold text-gray-900">{title}</h3>
+                                    <p className="mt-2 text-xs text-gray-600 leading-relaxed">{text}</p>
+                                </div>
+                            ))}
+                        </section>
+                    </>
+                )}
+
+                {activeTab === "features" && (
+                    <section>
+                        <div className="mb-10">
+                            <h2 className="text-2xl md:text-3xl font-black text-gray-900">Everything you need to close more deals</h2>
+                        </div>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-x-10 gap-y-10">
+                            {[
+                                {
+                                    category: "Pipeline Management",
+                                    items: [
+                                        { title: "Kanban pipeline", desc: "Drag-and-drop deal stages with real-time revenue visibility and health scores." },
+                                        { title: "Smart forecasting", desc: "Weighted pipeline value and expected close dates updated automatically." },
+                                        { title: "Stage customization", desc: "Configure stages per team and add win probability for accurate forecasts." },
+                                    ],
+                                },
+                                {
+                                    category: "AI Prospecting",
+                                    items: [
+                                        { title: "Automated research", desc: "Agent-driven company research, buyer persona detection, and signal analysis." },
+                                        { title: "Personalized outreach", desc: "AI-generated email drafts tailored to each prospect's context and pain points." },
+                                        { title: "Sequence builder", desc: "Multi-step outreach sequences with scheduled follow-ups and channel mixing." },
+                                    ],
+                                },
+                                {
+                                    category: "Deal Intelligence",
+                                    items: [
+                                        { title: "Risk alerts", desc: "Real-time health scores and early warning signals for deals at risk." },
+                                        { title: "Recovery plays", desc: "AI-suggested talking points and next best actions to revive stalled deals." },
+                                        { title: "Activity monitoring", desc: "Track meetings, calls, and emails attached to every opportunity." },
+                                    ],
+                                },
+                                {
+                                    category: "Contacts & Companies",
+                                    items: [
+                                        { title: "Unified profiles", desc: "Shared address book with full history: emails, meetings, orders, and notes." },
+                                        { title: "Import & enrich", desc: "Bulk import from CSV and automatic enrichment from email or domain." },
+                                        { title: "Multi-address", desc: "Multiple contacts, locations, and relationships per company record." },
+                                    ],
+                                },
+                                {
+                                    category: "Communication",
+                                    items: [
+                                        { title: "Email integration", desc: "One-click Gmail and Outlook compose with pre-filled AI drafts." },
+                                        { title: "Call logging", desc: "Log calls, schedule follow-ups, and queue outreach from any record." },
+                                        { title: "Meeting scheduling", desc: "Plan meetings tied to opportunities and sync context with your team." },
+                                    ],
+                                },
+                                {
+                                    category: "Reporting",
+                                    items: [
+                                        { title: "Live dashboards", desc: "Predefined pipeline, activity, and revenue dashboards at a glance." },
+                                        { title: "Opportunity analysis", desc: "Filter, group, and drill down into deal data with advanced views." },
+                                        { title: "Team performance", desc: "Rep-level activity counts, win rates, and quota tracking." },
+                                    ],
+                                },
+                            ].map((group) => (
+                                <div key={group.category}>
+                                    <h3 className="text-base font-bold text-gray-900 mb-4">{group.category}</h3>
+                                    <div className="space-y-4">
+                                        {group.items.map((item) => (
+                                            <div key={item.title}>
+                                                <h4 className="text-sm font-bold text-gray-800">{item.title}</h4>
+                                                <p className="mt-1 text-xs text-gray-600 leading-relaxed">{item.desc}</p>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             ))}
                         </div>
-                    </div>
-                </section>
-
-                <section className="mt-14 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {[
-                        ["Track opportunities", "Kanban-style pipeline with real-time revenue visibility."],
-                        ["Never miss follow-ups", "Meetings, calls, and sequences in one shared flow."],
-                        ["Unified communication", "Contacts, companies, and outreach context together."],
-                        ["Smart reporting", "Live health scores and AI-assisted recovery plays."],
-                    ].map(([title, text]) => (
-                        <div key={String(title)} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
-                            <h3 className="text-sm font-bold text-gray-900">{title}</h3>
-                            <p className="mt-2 text-xs text-gray-600 leading-relaxed">{text}</p>
-                        </div>
-                    ))}
-                </section>
+                    </section>
+                )}
             </div>
         </div>
     );
