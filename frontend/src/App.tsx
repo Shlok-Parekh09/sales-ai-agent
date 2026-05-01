@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 
 import { CustBudsLogoLockup, CustBudsLogoIcon } from "./components/CustBudsLogo";
 
+const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
+
 type TableRow = {
     id: number;
     [key: string]: any;
@@ -861,7 +863,7 @@ function CreateCompanyModal({ onClose, onSave, onAgentStart, onAgentResult, sell
                             if (onAgentStart && onAgentResult) {
                                 onAgentStart(); // shows loading banner
                                 try {
-                                    const res = await fetch("http://localhost:5000/api/agent/prospect", {
+                                    const res = await fetch(`${API_BASE_URL}/api/agent/prospect`, {
                                         method: "POST",
                                         headers: { "Content-Type": "application/json" },
                                         body: JSON.stringify({
@@ -1920,7 +1922,7 @@ function CompaniesView({
         onAgentStart();
 
         try {
-            const res = await fetch("http://localhost:5000/api/agent/prospect", {
+            const res = await fetch(`${API_BASE_URL}/api/agent/prospect`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -2738,7 +2740,7 @@ function DealIntelligenceView({ agentResults = [] }: { agentResults?: AgentResul
 
         const run = async () => {
             try {
-                const res = await fetch("http://localhost:5000/api/agent/deal-intelligence", {
+                const res = await fetch(`${API_BASE_URL}/api/agent/deal-intelligence`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: modelPayload,
@@ -4286,7 +4288,7 @@ export default function CRMDashboard() {
             const name = company["Company name"] || company.name || "";
             if (!name) continue;
             try {
-                const res = await fetch("http://localhost:5000/api/agent/prospect", {
+                const res = await fetch(`${API_BASE_URL}/api/agent/prospect`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -4343,7 +4345,7 @@ export default function CRMDashboard() {
                 companyRecord = companies.find(company => normaliseLookupKey(company["Company name"]) === normaliseLookupKey(result.companyName)) || null;
             } catch {}
 
-            const res = await fetch("http://localhost:5000/api/agent/prospect", {
+            const res = await fetch(`${API_BASE_URL}/api/agent/prospect`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
